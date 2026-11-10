@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-default-mode="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fit Planner: size LLM deployments across accelerator meshes</title>
+    <meta name="description" content="Pick a model or paste its config.json, pick hardware, and see memory fit, tensor and pipeline splits, KV-cache capacity, roofline decode and prefill speed, and cost per million tokens before you buy or rent." />
+    <meta name="theme-color" content="#f5f4ef" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23201f1e'/><rect x='6' y='6' width='9' height='9' rx='1.5' fill='%237265c8'/><rect x='17' y='6' width='9' height='9' rx='1.5' fill='%23ffc757'/><rect x='6' y='17' width='9' height='9' rx='1.5' fill='%2340bfa8'/><rect x='17' y='17' width='9' height='9' rx='1.5' fill='%23f5f4ef'/></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search).get('mode')
+        var m = q === 'light' || q === 'dark' ? q : localStorage.getItem('themeMode')
+        document.documentElement.dataset.themeMode = m === 'light' || m === 'dark' ? m : document.documentElement.dataset.defaultMode
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
