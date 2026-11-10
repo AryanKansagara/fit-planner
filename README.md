@@ -4,7 +4,7 @@ Plan an LLM deployment across accelerator meshes before you buy or rent the card
 
 Pick a model (or paste / fetch its Hugging Face `config.json`) and the hardware you are considering. Fit Planner works out whether it fits, how to split it with tensor and pipeline parallelism, how much KV cache is left, and roofline estimates for decode and prefill speed, time to first token, $/1M tokens and tokens per joule. A search ranks every device and mesh size by hourly cost for your throughput and latency targets.
 
-**Live:** https://fit-planner.vercel.app
+**Live:** https://fit-planner-xi.vercel.app
 
 ## The pain
 
