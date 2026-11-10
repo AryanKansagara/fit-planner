@@ -244,7 +244,7 @@ function PlanTab({ p, update }: { p: Project; update: Update }) {
               <Mesh tp={r.tp} pp={r.pp} fill={fill} label={device.name} />
               <MeshLegend fill={fill} />
             </div>
-            <Dial value={r.decode.tokS} max={Math.max(50, niceMax(curve.length ? Math.max(...curve.map(c => c.tokS)) : r.decode.tokS))} label="tok/s decode" sub={`${fmtNum(r.decode.perUserTokS, 1)} tok/s per sequence`} />
+            <Dial value={r.decode.tokS} max={Math.max(50, niceMax(Math.max(r.decode.tokS * 1.25, ...curve.filter(c => c.fits).map(c => c.tokS))))} label="tok/s decode" sub={`${fmtNum(r.decode.perUserTokS, 1)} tok/s per sequence`} />
           </div>
         </div>
 

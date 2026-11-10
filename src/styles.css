@@ -192,6 +192,7 @@ main:focus { outline: none; }
 .hc-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .hc-head .utility::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green-400); margin-right: .45rem; animation: blink 1.6s infinite; }
 .hc-body { display: grid; grid-template-columns: 1fr 200px; gap: 1rem; align-items: center; }
+.hc-mesh .mesh.compact .tile { max-height: 110px; }
 .hc-caption { display: flex; flex-direction: column; margin: .6rem 0 .2rem; font-size: .9rem; }
 .hc-caption span { color: var(--muted); font-size: .82rem; }
 .hc-controls { display: grid; gap: .8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
@@ -437,7 +438,7 @@ details[open] > summary::before { content: '−'; }
 }
 @media (max-width: 560px) {
   .header-inner { padding: .55rem .8rem; gap: .5rem; }
-  .brand span { display: none; }
+  .brand > span:not(.monogram) { display: none; }
   .page { padding: 1.5rem .9rem; }
   .hero { padding: 2rem .9rem; }
   .hero-card { padding: .9rem; }

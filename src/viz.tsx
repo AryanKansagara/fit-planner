@@ -4,7 +4,7 @@ import { fmtGB, fmtNum, fmtTok } from './ui.tsx'
 export interface TileFill { weightsGB: number; kvGB: number; reserveGB: number; capGB: number }
 
 /** Grid of devices: columns are the tensor-parallel group, rows are pipeline stages. Each tile fills with weights, KV cache and reserve. */
-export function Mesh({ tp, pp, fill, label, maxTiles = 64, compact }: { tp: number; pp: number; fill: TileFill; label?: string; maxTiles?: number; compact?: boolean }) {
+export function Mesh({ tp, pp, fill, maxTiles = 64, compact }: { tp: number; pp: number; fill: TileFill; label?: string; maxTiles?: number; compact?: boolean }) {
   const total = tp * pp
   const shownPp = Math.max(1, Math.min(pp, Math.floor(maxTiles / tp)))
   const used = fill.weightsGB + fill.kvGB + fill.reserveGB
@@ -20,7 +20,6 @@ export function Mesh({ tp, pp, fill, label, maxTiles = 64, compact }: { tp: numb
             <i className="t-res" style={{ height: pct(fill.reserveGB) }} />
             <i className="t-w" style={{ height: pct(fill.weightsGB), bottom: pct(fill.reserveGB) }} />
             <i className="t-kv" style={{ height: pct(kvShown), bottom: pct(fill.reserveGB + fill.weightsGB) }} />
-            {!compact && i === 0 && <span className="tile-lbl">{label ?? ''}</span>}
           </div>
         ))}
       </div>

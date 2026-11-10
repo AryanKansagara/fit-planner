@@ -34,7 +34,7 @@ export default function SearchTab({ p, update }: { p: Project; update: Update })
   }
   return (
     <div className="stack">
-      <div className="card pad">
+      <div className="card pad stack-sm">
         <div className="row between wrap gap-sm"><h2 className="h5">Targets</h2><span className="muted small">{p.workload.batch} concurrent sequences, {fmtNum(p.workload.promptLen)}-token prompts, {p.workload.weightDtype.toUpperCase()} weights. Change these on the Plan tab.</span></div>
         <div className="row gap wrap">
           <NumField label="Aggregate throughput at least" suffix="tok/s" value={p.targets.minTokS} min={0} step={10} onChange={v => t({ minTokS: v })} />
@@ -66,7 +66,7 @@ export function OptionTable({ opts, onUse, current, print }: { opts: SearchOptio
       <table className="vt options">
         <thead><tr>
           <th scope="col">#</th><th scope="col">Hardware</th><th scope="col" className="num">tok/s</th><th scope="col" className="num">ms/token</th><th scope="col" className="num">TTFT</th>
-          <th scope="col" className="num">$/hour</th><th scope="col" className="num">$/1M tok</th><th scope="col" className="num">Hardware</th><th scope="col" className="num">tok/J</th>{!print && <th scope="col"><span className="sr-only">Use</span></th>}
+          <th scope="col" className="num">$/hour</th><th scope="col" className="num">$/1M tok</th><th scope="col" className="num">Capex</th><th scope="col" className="num">tok/J</th>{!print && <th scope="col"><span className="sr-only">Use</span></th>}
         </tr></thead>
         <tbody>
           {opts.map((o, i) => {
