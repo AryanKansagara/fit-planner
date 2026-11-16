@@ -1,4 +1,4 @@
-import { kvBytesPerToken, paramCounts, type ParamCounts } from './model.ts'
+import { attnPairs, kvBytesForSeq, kvBytesPerToken, kvTokenLayers, paramCounts, seqLenForBytes, type ParamCounts } from './model.ts'
 import { DTYPES, type Assumptions, type Device, type Layout, type ModelSpec, type Targets, type Workload } from './types.ts'
 
 export const GB = 1e9
@@ -78,17 +78,21 @@ export function memoryFit(m: ModelSpec, wl: Workload, l: Layout, a: Assumptions)
   // The heaviest stage: its share of layers plus the embedding (first stage) or head (last stage).
   const edge = l.pp === 1 ? s.emb + (m.tied ? 0 : s.head) : Math.max(s.emb, m.tied ? s.emb : s.head)
   const weights = (layersOnStage * s.perLayerAvg + edge) / l.tp
-  const kvPerTokenDev = kvBytesPerToken(m, wl.kvDtype) * (layersOnStage / m.layers) / kvShard(m, l.tp)
+  const devShare = (layersOnStage / m.layers) / kvShard(m, l.tp)
+  const kvPerTokenDev = kvBytesPerToken(m, wl.kvDtype) * devShare
+  const ctx = Math.max(1, wl.context)
+  // One sequence at the reserved context; less than context x per-token when some layers use a sliding window.
+  const kvSeq = kvBytesForSeq(m, wl.kvDtype, ctx) * devShare
   const cap = l.device.memGB * GB
   const reserve = a.reserveGB * GB + a.reserveFrac * cap
   const free = cap - reserve - weights
-  const maxTokens = free > 0 ? Math.floor(free / kvPerTokenDev) : 0
-  const kv = kvPerTokenDev * wl.context * wl.batch
+  const maxTokens = free > 0 ? Math.floor(free / (kvSeq / ctx)) : 0
+  const kv = kvSeq * wl.batch
   return {
     weightsGB: weights / GB, kvGB: kv / GB, reserveGB: reserve / GB, usedGB: (weights + kv + reserve) / GB, capGB: l.device.memGB,
     weightsFit: free > 0, fits: free >= kv && free > 0, kvPerTokenDev, maxTokens,
-    maxBatch: Math.floor(maxTokens / Math.max(1, wl.context)),
-    maxContext: Math.min(m.maxContext, Math.floor(maxTokens / Math.max(1, wl.batch))),
+    maxBatch: free > 0 ? Math.floor(free / kvSeq) : 0,
+    maxContext: free > 0 ? Math.min(m.maxContext, seqLenForBytes(m, wl.kvDtype, free / Math.max(1, wl.batch) / devShare)) : 0,
   }
 }
 
@@ -128,8 +132,8 @@ export function decodeStep(m: ModelSpec, wl: Workload, l: Layout, a: Assumptions
   const s = weightSplit(m, p, DTYPES[wl.weightDtype].bytes)
   const touched = m.moe ? expectedExperts(m.moe.experts, m.moe.active, batch) / m.moe.experts : 1
   const weightRead = (s.fixed + s.expertsAll * touched + s.head) / l.tp
-  const kvRead = batch * kvLen * kvBytesPerToken(m, wl.kvDtype) / kvShard(m, l.tp)
-  const flops = (2 * linearActive(m, p) * batch + m.layers * attnFlopsPerPair(m, true) * kvLen * batch) / l.tp
+  const kvRead = batch * kvBytesForSeq(m, wl.kvDtype, kvLen) / kvShard(m, l.tp)
+  const flops = (2 * linearActive(m, p) * batch + kvTokenLayers(m, kvLen) * attnFlopsPerPair(m, true) * batch) / l.tp
   return phase(batch, flops, weightRead + kvRead, commS(batch, m, l, a), l, wl, a)
 }
 
@@ -138,9 +142,9 @@ export function prefillPhase(m: ModelSpec, wl: Workload, l: Layout, a: Assumptio
   const p = paramCounts(m)
   const s = weightSplit(m, p, DTYPES[wl.weightDtype].bytes)
   const touched = m.moe ? expectedExperts(m.moe.experts, m.moe.active, n) / m.moe.experts : 1
-  const bytes = (s.fixed + s.expertsAll * touched + s.head) / l.tp + n * kvBytesPerToken(m, wl.kvDtype) / kvShard(m, l.tp)
+  const bytes = (s.fixed + s.expertsAll * touched + s.head) / l.tp + kvBytesForSeq(m, wl.kvDtype, n) / kvShard(m, l.tp)
   const linear = 2 * (p.active - p.embedding - p.head - m.hidden) * n + 2 * m.vocab * m.hidden
-  const attn = m.layers * attnFlopsPerPair(m, false) * n * n / 2
+  const attn = attnPairs(m, n) * attnFlopsPerPair(m, false)
   return phase(n, (linear + attn) / l.tp, bytes, commS(n, m, l, a), l, wl, a)
 }
 

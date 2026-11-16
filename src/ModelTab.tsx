@@ -199,8 +199,9 @@ function Breakdown({ result }: { result: ReturnType<typeof parseConfig> }) {
         {rows.filter(r => r[1] > 0).map(([l, v], i) => <i key={l} className={`sb${i}`} style={{ flexGrow: v }} title={`${l}: ${fmtB(v)}`} />)}
       </div>
       <ul className="legend">{rows.map(([l, v], i) => <li key={l}><i className={`sb${i}`} />{l} {fmtB(v)}</li>)}</ul>
-      {m.moe && <p className="muted small">{m.moe.experts} experts, {m.moe.active} routed per token{m.moe.shared ? ` plus ${m.moe.shared} shared` : ''}{m.moe.denseLayers ? `; first ${m.moe.denseLayers} layers dense` : ''}. Every expert must be resident, but decode only reads the experts the batch actually hits.</p>}
+      {m.moe && <p className="muted small">{m.moe.experts} experts, {m.moe.active} routed per token{m.moe.shared ? ` plus ${m.moe.shared} shared` : ''}{m.moe.denseLayers ? `; ${m.moe.denseLayers} dense layers` : ''}. Every expert must be resident, but decode only reads the experts the batch actually hits.</p>}
       {m.mla && <p className="muted small">Latent attention: {m.mla.kvLoraRank}-dim KV latent plus {m.mla.qkRope}-dim RoPE key per layer, replicated across a tensor-parallel group.</p>}
+      {m.window && <p className="muted small">Sliding window: {m.window.layers} of {m.layers} layers attend to the last {fmtNum(m.window.size)} tokens only, so at long context the KV cache is far smaller than {fmtNum(kvBytesPerToken(m, 'bf16') / 1024)} KB x tokens.</p>}
     </div>
   )
 }

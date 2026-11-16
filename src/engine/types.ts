@@ -43,6 +43,8 @@ export interface ModelSpec {
   qkNorm: boolean
   moe?: MoeSpec
   mla?: MlaSpec
+  /** Sliding-window attention: `layers` of the model only attend to the last `size` tokens. */
+  window?: { size: number; layers: number }
 }
 
 export interface Device {

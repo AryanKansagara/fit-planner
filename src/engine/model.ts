@@ -14,6 +14,8 @@ export interface ParseResult {
 const PLAIN_MLP = new Set(['gpt2', 'gpt_neox', 'gptj', 'opt', 'bloom', 'falcon', 'gpt_bigcode', 'phi', 'starcoder2', 'mpt'])
 const QKV_BIAS = new Set(['qwen2', 'qwen2_moe', 'qwen2_vl'])
 const QK_NORM = new Set(['qwen3', 'qwen3_moe', 'olmo2', 'gemma3', 'gemma3_text'])
+// Architectures whose transformers config class ties the output head to the embedding when the key is absent.
+const TIED_BY_DEFAULT = new Set(['gpt2', 'gemma', 'gemma2', 'gemma3', 'gemma3_text', 'bloom', 'opt'])
 
 /** 1-based line of the first `"key":` in the JSON text. */
 export function lineOf(text: string, key: string): number | undefined {
@@ -67,20 +69,22 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
     return NaN
   }
 
-  const hidden = num('hidden', 'Hidden size', ['hidden_size', 'n_embd', 'd_model', 'dim'])
+  const hidden = num('hidden', 'Hidden size', ['hidden_size', 'n_embd', 'n_embed', 'd_model', 'dim'])
   const layers = num('layers', 'Layers', ['num_hidden_layers', 'n_layer', 'num_layers', 'n_layers'])
   const heads = num('heads', 'Attention heads', ['num_attention_heads', 'n_head', 'n_heads'])
-  const kvHeads = num('kvHeads', 'KV heads', ['num_key_value_heads', 'n_head_kv', 'num_kv_heads', 'multi_query_group_num'], { value: heads, why: 'no GQA field, so full multi-head attention' })
+  const kvHeads = num('kvHeads', 'KV heads', ['num_key_value_heads', 'n_head_kv', 'num_kv_heads', 'multi_query_group_num'], o.multi_query === true
+    ? { value: 1, why: 'multi_query: true, one shared KV head', level: 'info' }
+    : { value: heads, why: 'no GQA field, so full multi-head attention' })
   const isMla = typeof o.kv_lora_rank === 'number'
   const headDim = isMla
     ? Number(o.qk_nope_head_dim ?? 0) + Number(o.qk_rope_head_dim ?? 0)
     : num('headDim', 'Head dim', ['head_dim', 'kv_channels'], { value: Math.round(hidden / heads), why: 'hidden size / heads', level: 'info' })
-  const intermediate = num('intermediate', 'MLP intermediate', ['intermediate_size', 'n_inner', 'ffn_dim', 'ffn_hidden_size'], { value: 4 * hidden, why: '4 x hidden size' })
+  const intermediate = num('intermediate', 'MLP intermediate', typeof o.intermediate_size_mlp === 'number' ? ['intermediate_size_mlp'] : ['intermediate_size', 'n_inner', 'ffn_dim', 'ffn_hidden_size'], { value: 4 * hidden, why: '4 x hidden size' })
   const vocab = num('vocab', 'Vocabulary', ['vocab_size', 'padded_vocab_size'])
   const maxContext = num('maxContext', 'Max context', ['max_position_embeddings', 'n_positions', 'seq_length', 'max_sequence_length'], { value: 4096, why: 'no position limit in the config' })
 
   const tiedRaw = o.tie_word_embeddings
-  const tied = typeof tiedRaw === 'boolean' ? tiedRaw : modelType === 'gpt2'
+  const tied = typeof tiedRaw === 'boolean' ? tiedRaw : TIED_BY_DEFAULT.has(modelType)
   mapping.push({ field: 'tied', label: 'Tied embeddings', value: tied, source: typeof tiedRaw === 'boolean' ? 'tie_word_embeddings' : 'assumed from model_type', line: lineOf(text, 'tie_word_embeddings') })
 
   const gated = !PLAIN_MLP.has(modelType)
@@ -94,14 +98,23 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   if (expertKey) {
     const experts = num('moe.experts', 'Experts', [expertKey])
     const active = num('moe.active', 'Active experts per token', ['num_experts_per_tok', 'num_selected_experts', 'moe_topk', 'top_k'], { value: 2, why: 'common top-2 routing' })
-    const expertInter = num('moe.expertInter', 'Expert intermediate', ['moe_intermediate_size', 'expert_intermediate_size'], { value: intermediate, why: 'same as intermediate_size', level: 'info' })
+    // Llama 4 names the expert width intermediate_size and the dense MLP width intermediate_size_mlp.
+    const llama4 = typeof o.intermediate_size_mlp === 'number'
+    const expertInter = num('moe.expertInter', 'Expert intermediate', llama4 ? ['intermediate_size'] : ['moe_intermediate_size', 'expert_intermediate_size'], { value: intermediate, why: 'same as intermediate_size', level: 'info' })
     let shared = 0, sharedInter = 0
     if (typeof o.n_shared_experts === 'number') { shared = num('moe.shared', 'Shared experts', ['n_shared_experts']); sharedInter = expertInter }
     else if (typeof o.shared_expert_intermediate_size === 'number' && o.shared_expert_intermediate_size > 0) { shared = 1; sharedInter = num('moe.sharedInter', 'Shared expert intermediate', ['shared_expert_intermediate_size']) }
+    else if (llama4) { shared = 1; sharedInter = expertInter }
     let denseLayers = 0
     if (typeof o.first_k_dense_replace === 'number') denseLayers = num('moe.denseLayers', 'Leading dense layers', ['first_k_dense_replace'])
-    else if (Array.isArray(o.mlp_only_layers)) denseLayers = o.mlp_only_layers.length
-    if (typeof o.decoder_sparse_step === 'number' && o.decoder_sparse_step > 1) issues.push({ level: 'warn', message: `decoder_sparse_step is ${o.decoder_sparse_step}: only every ${o.decoder_sparse_step}th layer is MoE. Treated as all-MoE, so totals run high.`, line: lineOf(text, 'decoder_sparse_step') })
+    else {
+      // Qwen MoE and Llama 4 put experts in every step-th layer (layer i is sparse when (i + 1) % step == 0).
+      const stepKey = ['decoder_sparse_step', 'interleave_moe_layer_step'].find(k => typeof o[k] === 'number' && (o[k] as number) > 1)
+      const step = stepKey ? (o[stepKey] as number) : 1
+      const only = Array.isArray(o.mlp_only_layers) ? new Set(o.mlp_only_layers as number[]) : new Set<number>()
+      for (let i = 0; i < layers; i++) if ((i + 1) % step !== 0 || only.has(i)) denseLayers++
+      if (stepKey) issues.push({ level: 'info', message: `${stepKey} is ${step}: ${layers - denseLayers} of ${layers} layers use experts, the rest a dense MLP.`, line: lineOf(text, stepKey) })
+    }
     if (active > experts) issues.push({ level: 'error', field: 'moe.active', message: `Active experts (${active}) exceeds experts (${experts}).`, line: lineOf(text, 'num_experts_per_tok') })
     moe = { experts, active, expertInter, shared, sharedInter, denseLayers }
   }
@@ -121,7 +134,20 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
 
   if (Number.isFinite(heads) && Number.isFinite(kvHeads) && heads % kvHeads !== 0) issues.push({ level: 'error', field: 'kvHeads', message: `Attention heads (${heads}) must be a multiple of KV heads (${kvHeads}).`, line: lineOf(text, 'num_key_value_heads') })
   if (!mla && o.head_dim === undefined && Number.isFinite(hidden) && hidden % heads !== 0) issues.push({ level: 'warn', field: 'headDim', message: `hidden_size ${hidden} is not divisible by ${heads} heads; head_dim rounded.` })
-  if (typeof o.sliding_window === 'number' && o.use_sliding_window !== false) issues.push({ level: 'info', message: `Sliding window of ${o.sliding_window} tokens declared. KV is sized for full attention, which is the upper bound.`, line: lineOf(text, 'sliding_window') })
+  let window: ModelSpec['window']
+  if (typeof o.sliding_window === 'number' && o.sliding_window > 0 && o.use_sliding_window !== false && Number.isFinite(layers)) {
+    const size = o.sliding_window
+    let wl = layers, how = 'every layer'
+    if (Array.isArray(o.layer_types)) { wl = o.layer_types.filter(t => t === 'sliding_attention').length; how = 'per layer_types' }
+    else if (typeof o.sliding_window_pattern === 'number' && o.sliding_window_pattern > 1) {
+      const n = o.sliding_window_pattern
+      wl = layers - Math.floor(layers / n); how = `every layer except each ${n}th`
+    } else if (modelType === 'gemma2') { wl = Math.ceil(layers / 2); how = 'alternating layers' }
+    if (wl > 0 && size < maxContext) {
+      window = { size, layers: wl }
+      issues.push({ level: 'info', message: `Sliding window of ${size} tokens on ${wl} of ${layers} layers (${how}). Those layers keep at most ${size} tokens of KV.`, line: lineOf(text, 'sliding_window') })
+    }
+  }
 
   let suggestedDtype: WeightDtype | undefined
   const q = o.quantization_config as Record<string, unknown> | undefined
@@ -137,7 +163,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   const name = nameHint || (typeof o._name_or_path === 'string' && o._name_or_path ? o._name_or_path : arch)
   if (issues.some(i => i.level === 'error')) return { spec: null, issues, mapping, suggestedDtype, format: `config.json (${modelType})` }
   return {
-    spec: { name, arch: modelType, hidden, layers, heads, kvHeads, headDim, intermediate, vocab, tied, maxContext, gated, qkvBias, qkNorm, moe, mla },
+    spec: { name, arch: modelType, hidden, layers, heads, kvHeads, headDim, intermediate, vocab, tied, maxContext, gated, qkvBias, qkNorm, moe, mla, window },
     issues, mapping, suggestedDtype, format: `config.json (${modelType})`,
   }
 }
@@ -206,6 +232,30 @@ export function kvBytesPerToken(m: ModelSpec, dtype: KvDtype): number {
   return 2 * m.layers * m.kvHeads * m.headDim * b
 }
 
+/** Layer-tokens of KV one sequence holds at length n: full-attention layers keep every token, sliding layers at most the window. */
+export function kvTokenLayers(m: ModelSpec, n: number): number {
+  const s = m.window ? m.window.layers : 0
+  return (m.layers - s) * n + s * Math.min(n, m.window ? m.window.size : n)
+}
+
+/** KV-cache bytes for one sequence of n tokens across all layers. */
+export const kvBytesForSeq = (m: ModelSpec, dtype: KvDtype, n: number) => kvBytesPerToken(m, dtype) / m.layers * kvTokenLayers(m, n)
+
+/** Longest sequence whose KV fits in `bytes` (inverse of kvBytesForSeq). */
+export function seqLenForBytes(m: ModelSpec, dtype: KvDtype, bytes: number): number {
+  const per = kvBytesPerToken(m, dtype) / m.layers
+  const t = bytes / per
+  const s = m.window ? m.window.layers : 0, w = m.window ? m.window.size : 0
+  if (t <= m.layers * w || !m.window) return Math.floor(t / m.layers)
+  return s === m.layers ? Infinity : Math.floor((t - s * w) / (m.layers - s))
+}
+
+/** Causal attention (query, key) pairs summed over layers for a prompt of n tokens. */
+export function attnPairs(m: ModelSpec, n: number): number {
+  const s = m.window ? m.window.layers : 0, w = m.window ? Math.min(m.window.size, n) : n
+  return (m.layers - s) * n * n / 2 + s * (n * w - w * w / 2)
+}
+
 /** Manual entry: a dense GQA decoder from a handful of numbers. */
 export function manualSpec(p: { name: string; hidden: number; layers: number; heads: number; kvHeads: number; intermediate: number; vocab: number; maxContext: number; experts?: number; activeExperts?: number; expertInter?: number }): ModelSpec {
   return {
@@ -223,5 +273,6 @@ export function specToConfig(m: ModelSpec): string {
     tie_word_embeddings: m.tied,
   }
   if (m.moe) Object.assign(o, { num_local_experts: m.moe.experts, num_experts_per_tok: m.moe.active, moe_intermediate_size: m.moe.expertInter })
+  if (m.window) Object.assign(o, { sliding_window: m.window.size, layer_types: Array.from({ length: m.layers }, (_, i) => i < m.window!.layers ? 'sliding_attention' : 'full_attention') })
   return JSON.stringify(o, null, 2)
 }
