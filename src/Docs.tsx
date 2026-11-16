@@ -3,7 +3,7 @@ import { DEFAULT_ASSUMPTIONS as A } from './engine/plan.ts'
 import { DTYPES } from './engine/types.ts'
 import { Code, fmtNum, fmtUsd, Link } from './ui.tsx'
 
-const SECTIONS = [['config', 'Getting config.json'], ['fields', 'What is read from it'], ['hardware', 'Hardware profiles'], ['method', 'How it is calculated'], ['plans', 'Plan files and CSV'], ['data', 'Your data and sync'], ['limits', 'Limits']] as const
+const SECTIONS = [['config', 'Getting config.json'], ['fields', 'What is read from it'], ['validated', 'Checked against the Hub'], ['hardware', 'Hardware profiles'], ['method', 'How it is calculated'], ['plans', 'Plan files and CSV'], ['data', 'Your data and sync'], ['limits', 'Limits']] as const
 
 export default function Docs() {
   return (
@@ -38,20 +38,44 @@ huggingface-cli download meta-llama/Llama-3.3-70B-Instruct config.json --local-d
           <table className="vt compact">
             <thead><tr><th scope="col">Planner field</th><th scope="col">config.json keys (first found wins)</th><th scope="col">If missing</th></tr></thead>
             <tbody>
-              <tr><th scope="row">Hidden size</th><td className="mono">hidden_size, n_embd, d_model, dim</td><td>error</td></tr>
+              <tr><th scope="row">Hidden size</th><td className="mono">hidden_size, n_embd, n_embed, d_model, dim</td><td>error</td></tr>
               <tr><th scope="row">Layers</th><td className="mono">num_hidden_layers, n_layer, num_layers</td><td>error</td></tr>
               <tr><th scope="row">Attention heads</th><td className="mono">num_attention_heads, n_head</td><td>error</td></tr>
-              <tr><th scope="row">KV heads</th><td className="mono">num_key_value_heads, n_head_kv, num_kv_heads</td><td>warning, assumes full multi-head attention</td></tr>
+              <tr><th scope="row">KV heads</th><td className="mono">num_key_value_heads, n_head_kv, num_kv_heads; multi_query (Falcon) means one</td><td>warning, assumes full multi-head attention</td></tr>
               <tr><th scope="row">Head dim</th><td className="mono">head_dim, kv_channels</td><td>hidden / heads</td></tr>
-              <tr><th scope="row">MLP width</th><td className="mono">intermediate_size, n_inner, ffn_dim</td><td>warning, 4 x hidden</td></tr>
+              <tr><th scope="row">MLP width</th><td className="mono">intermediate_size, n_inner, ffn_dim; intermediate_size_mlp for Llama 4 dense layers</td><td>warning, 4 x hidden</td></tr>
               <tr><th scope="row">Vocabulary, context</th><td className="mono">vocab_size; max_position_embeddings, n_positions</td><td>error; 4,096</td></tr>
-              <tr><th scope="row">Experts</th><td className="mono">num_local_experts, num_experts, n_routed_experts; num_experts_per_tok; moe_intermediate_size; n_shared_experts; first_k_dense_replace</td><td>dense model</td></tr>
+              <tr><th scope="row">Experts</th><td className="mono">num_local_experts, num_experts, n_routed_experts; num_experts_per_tok; moe_intermediate_size; n_shared_experts, shared_expert_intermediate_size; first_k_dense_replace, decoder_sparse_step, interleave_moe_layer_step, mlp_only_layers</td><td>dense model</td></tr>
               <tr><th scope="row">Latent attention</th><td className="mono">kv_lora_rank, q_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim</td><td>standard attention</td></tr>
+              <tr><th scope="row">Sliding window</th><td className="mono">sliding_window, use_sliding_window; layer_types, sliding_window_pattern (Gemma 2 alternates)</td><td>full attention on every layer</td></tr>
+              <tr><th scope="row">Tied head</th><td className="mono">tie_word_embeddings</td><td>tied for GPT-2, Gemma, BLOOM, OPT (their library default); untied otherwise</td></tr>
               <tr><th scope="row">Precision hint</th><td className="mono">quantization_config, torch_dtype</td><td>BF16</td></tr>
             </tbody>
           </table>
         </div>
         <p>The validation report lists every error and assumption with its line number, and the field mapping shows which key each number came from. Configs with errors cannot be used until fixed.</p>
+
+        <h2 id="validated">Checked against the Hub</h2>
+        <p>The importer is tested against real config.json files from the Hugging Face Hub. The reference is the parameter total the Hub reads from each repo's safetensors headers (<code>https://huggingface.co/api/models/&lt;repo&gt;?expand[]=safetensors</code>, retrieved 2026-11-13). Every model below lands within 0.1%.</p>
+        <div className="table-card card scroll-x">
+          <table className="vt compact">
+            <thead><tr><th scope="col">Repo</th><th scope="col">What it exercises</th><th scope="col" className="num">Hub total</th></tr></thead>
+            <tbody>
+              {[
+                ['tiiuae/falcon-7b', 'multi_query (one KV head), plain MLP, untied head', '7.217B'],
+                ['bigscience/bloom-560m', 'n_embed key, tied head by default', '0.559B'],
+                ['google/gemma-2-9b', 'tied by default, sliding window on alternating layers', '9.242B'],
+                ['mistralai/Mistral-7B-v0.1', '4,096-token sliding window on every layer', '7.242B'],
+                ['microsoft/Phi-3.5-MoE-instruct', '16 experts, top-2', '41.87B'],
+                ['Qwen/Qwen1.5-MoE-A2.7B', '60 experts plus a wide shared expert', '14.32B'],
+                ['allenai/OLMoE-1B-7B-0924', '64 experts, top-8', '6.919B'],
+                ['deepseek-ai/DeepSeek-V2-Lite', 'latent attention, shared experts, leading dense layer', '15.71B'],
+                ['moonshotai/Kimi-K2-Instruct', '384 experts, latent attention, FP8 checkpoint', '1,026B'],
+              ].map(([r, w, t]) => <tr key={r}><th scope="row" className="mono small">{r}</th><td className="small">{w}</td><td className="num">{t}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+        <p>Also checked against model cards where the Hub total is not comparable: gpt-oss-20b (20.9B total, 3.6B active excluding embeddings; its MXFP4 experts are stored packed), Llama 4 Scout (17B active; the 109B headline includes the vision encoder) and GPT-2 (124M; the stored total includes attention-mask buffers).</p>
 
         <h2 id="hardware">Hardware profiles (as of {HARDWARE_AS_OF})</h2>
         <p>Figures come from public vendor spec sheets and list or typical street prices. TFLOPS are dense (no 2:4 sparsity). Interconnect is the per-device bandwidth realistically available to collectives: Ethernet port totals for Tenstorrent cards, one direction of NVLink, and a practical PCIe number for cards without a direct link. Treat entries marked approximate as starting points and edit them on the Hardware tab; edits stay with the plan.</p>
@@ -68,13 +92,13 @@ huggingface-cli download meta-llama/Llama-3.3-70B-Instruct config.json --local-d
         <ul>
           <li>Parameters: embedding (vocab x hidden), output head unless tied, and per layer the attention projections (Q, K, V, O, plus biases or QK-norm where the architecture has them), two norms, and a gated MLP of 3 x hidden x intermediate. MoE layers hold every expert plus shared experts and the router. Checked against published sizes: Llama 3.1 8B is 8.03B, Mixtral 8x7B is 46.7B (12.9B active), DeepSeek V3 is 671B (37B active).</li>
           <li>Bytes per weight: {Object.values(DTYPES).map(d => `${d.label} ${+d.bytes.toFixed(3)}`).join(', ')}. Block formats share one 8-bit exponent across 16 values.</li>
-          <li>KV bytes per token = 2 x layers x KV heads x head dim x bytes. Latent attention stores (kv_lora_rank + qk_rope_head_dim) per layer instead.</li>
+          <li>KV bytes per token = 2 x layers x KV heads x head dim x bytes. Latent attention stores (kv_lora_rank + qk_rope_head_dim) per layer instead. Sliding-window layers hold at most the window, so a sequence of n tokens costs per-layer bytes x (full layers x n + windowed layers x min(n, window)). For gpt-oss at 128k context that halves the cache.</li>
           <li>Per device: the heaviest pipeline stage gets ceil(layers / PP) layers plus the embedding or head, divided by TP. KV divides by min(TP, KV heads); past that, heads are replicated. Each device keeps {A.reserveGB} GB plus {A.reserveFrac * 100}% free by default.</li>
         </ul>
         <h3>Speed</h3>
         <ul>
           <li>Decode step = max(FLOPs / (peak x MFU), bytes / (bandwidth x utilisation)) + communication. Bytes are the non-expert weights, the head, the experts the batch is expected to touch (E x (1 - (1 - k/E)^batch)), and every sequence's KV cache at the average length prompt + output/2.</li>
-          <li>Prefill of P tokens = 2 x active params x P plus causal attention (layers x P² x per-head work / 2), compute-bound for any real prompt. Time to first token = prefill + one decode step.</li>
+          <li>Prefill of P tokens = 2 x active params x P plus causal attention (P² / 2 key-query pairs per full layer, P x W - W² / 2 per sliding-window layer, times per-head work), compute-bound for any real prompt. Time to first token = prefill + one decode step.</li>
           <li>Tensor parallel adds two ring all-reduces per layer: 2(n-1)/n x tokens x hidden x 2 bytes over the link, plus 2(n-1) hops of link latency. Pipeline stages run one after another (no microbatch interleaving), so PP saves memory but not decode latency.</li>
           <li>FP8-class weights (FP8, INT8, BFP8, BFP4) use the device's FP8 rate when it has one; 4-bit GGUF/AWQ weights are dequantised and run at FP16.</li>
           <li>Defaults: {A.bwUtil * 100}% of bandwidth, {A.mfu * 100}% MFU, {A.linkUtil * 100}% of link bandwidth. Change them per plan.</li>
@@ -109,7 +133,7 @@ huggingface-cli download meta-llama/Llama-3.3-70B-Instruct config.json --local-d
         <h2 id="limits">Limits</h2>
         <ul>
           <li>This is a roofline model. Kernel efficiency, scheduler overhead, speculative decoding, paged-attention fragmentation and prefix caching move real numbers by tens of percent. Calibrate the utilisation knobs with one measured run of your own.</li>
-          <li>Sliding-window and hybrid attention are sized as full attention, an upper bound on KV.</li>
+          <li>Llama 4's chunked attention and Qwen's max_window_layers are sized as full attention, an upper bound on KV. The vision tower of multimodal models is not counted.</li>
           <li>Prefill and decode are costed separately; continuous batching that mixes them is not simulated.</li>
           <li>Expert parallelism is modelled as tensor-parallel experts; all-to-all routing traffic is not costed.</li>
         </ul>

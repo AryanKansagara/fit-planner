@@ -13,12 +13,12 @@ Pick a model (or paste / fetch its Hugging Face `config.json`) and the hardware 
 ## Features
 
 - Import `config.json` by paste, file, or Hugging Face repo id; manual entry. Validation report with line numbers and a field mapping. Handles GQA, MoE (incl. shared experts and leading dense layers), multi-head latent attention, `text_config`, quantisation hints.
-- Engine (plain TS, 33 tests): parameter counts checked against published sizes (Llama 3.1 8B, Mixtral, DeepSeek V3...), weights by dtype incl. BFP8/BFP4, KV bytes per token, per-device memory for TP x PP, max batch and context, roofline decode and prefill with ring all-reduce over the interconnect, MoE expert-touch model, throughput curve, cost and energy, config search with data-parallel replicas.
+- Engine (plain TS, 43 tests): parameter counts checked against published sizes and against the Hub safetensors totals of 13 real config.json files (Falcon, BLOOM, Gemma 2, Mistral, Phi-3.5-MoE, Qwen MoE, OLMoE, DeepSeek V2, Kimi K2, gpt-oss, Llama 4...), sliding-window KV, weights by dtype incl. BFP8/BFP4, KV bytes per token, per-device memory for TP x PP, max batch and context, roofline decode and prefill with ring all-reduce over the interconnect, MoE expert-touch model, throughput curve, cost and energy, config search with data-parallel replicas.
 - Curated, dated hardware table (Tenstorrent Wormhole / Blackhole, NVIDIA, AMD), editable per plan, plus custom devices.
 - Saved snapshots with side-by-side compare, printable comparison report, plan JSON share/import, CSV export.
 - Local-first (IndexedDB); optional email sign-in syncs plans via Supabase. Light and dark themes, keyboard shortcuts, responsive.
 
-Samples: eight public architectures copied from their config.json files, plus synthetic workload profiles (labelled).
+Samples: nine public architectures copied from their config.json files, plus synthetic workload profiles (labelled).
 
 ## Run locally
 

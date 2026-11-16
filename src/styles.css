@@ -464,3 +464,4 @@ details[open] > summary::before { content: '−'; }
   * { animation: none !important; }
   @page { margin: 14mm; }
 }
+.docs-body p code, .docs-body li code { overflow-wrap: anywhere; }
