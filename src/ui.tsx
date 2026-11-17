@@ -282,7 +282,7 @@ export function Footer() {
       <div className="footer-inner">
         <div className="footer-brand"><Monogram /> <strong>Fit Planner</strong></div>
         <nav className="footer-nav" aria-label="Footer"><Link href="/app">Plans</Link><Link href="/docs">Docs</Link><Link href="/settings">Settings</Link></nav>
-        <p>Built by Aryan Kansagara. Independent project, not affiliated with Tenstorrent.</p>
+        <p>Built by Aryan Kansagara.</p>
         <p className="muted small">Estimates are first-order roofline models, not benchmarks. Sample architectures come from public config.json files; workload profiles are synthetic. Plans live in this browser unless you sign in to sync.</p>
       </div>
     </footer>

@@ -31,4 +31,4 @@ npm run build
 
 Copy `.env` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` to enable sync; without it the app runs local-only.
 
-Built by Aryan Kansagara. Independent project, not affiliated with Tenstorrent.
+Built by Aryan Kansagara.

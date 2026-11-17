@@ -88,7 +88,7 @@ function ReportBody({ p }: { p: Project }) {
           <h2>Assumptions</h2>
           <p className="small">Roofline model: decode reads active weights and the batch's KV cache at {Math.round(p.assumptions.bwUtil * 100)}% of peak bandwidth; prefill runs at {Math.round(p.assumptions.mfu * 100)}% of dense peak; tensor-parallel layers add two ring all-reduces each at {Math.round(p.assumptions.linkUtil * 100)}% of link bandwidth; pipeline stages run in sequence. Each device keeps {p.assumptions.reserveGB} GB plus {Math.round(p.assumptions.reserveFrac * 100)}% free for runtime and activations. Hardware figures as of {HARDWARE_AS_OF}{p.devices.length ? `, with ${p.devices.length} edited or custom device${p.devices.length > 1 ? 's' : ''}` : ''}. These are planning estimates, not benchmarks: measure before you buy.</p>
         </section>
-        <footer className="report-foot small muted">Fit Planner · independent project, not affiliated with Tenstorrent · {location.host}</footer>
+        <footer className="report-foot small muted">Fit Planner · {location.host}</footer>
       </article>
     </div>
   )
