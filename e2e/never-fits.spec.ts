@@ -148,7 +148,6 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #3.
   test('an imported plan with an illegal split is not reported as fitting', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/3: import accepts tp 3 for 32 heads and reports Fits')
     const cfg = '{"model_type":"llama","hidden_size":4096,"num_hidden_layers":32,"num_attention_heads":32,"num_key_value_heads":8,"intermediate_size":14336,"vocab_size":128256,"max_position_embeddings":131072}'
     const plan = { format: 'fit-planner/plan@1', plan: { name: 'Illegal split', model: { kind: 'paste', config: cfg, at: 0 }, workload: { weightDtype: 'bf16', kvDtype: 'bf16', context: 8192, batch: 1, promptLen: 1000, outputLen: 200 }, tp: 3, pp: 1 } }
     await page.goto('/app')
