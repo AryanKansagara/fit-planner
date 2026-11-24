@@ -9,7 +9,7 @@ import { NumField, type Update } from './Project.tsx'
 export function searchCsv(opts: SearchOption[]): string {
   const head = 'rank,meets_targets,device,cards_per_mesh,tp,pp,replicas,total_cards,agg_tok_s,ms_per_token,ttft_ms,usd_per_hour,usd_per_1m_tokens,hardware_usd,tok_per_joule,memory_used_gb,memory_gb,reason'
   const esc = (s: string) => /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  return [head, ...opts.map((o, i) => [i + 1, o.ok, esc(o.plan.device.name), o.plan.count, o.plan.tp, o.plan.pp, o.replicas, o.totalDevices, o.aggTokS.toFixed(1), o.plan.decode.ms.toFixed(2), o.plan.ttftMs.toFixed(0), o.perHour.toFixed(3), o.usdPerMTok.toFixed(3), o.plan.cost.capex * o.replicas, o.plan.cost.tokPerJ.toFixed(3), o.plan.mem.usedGB.toFixed(2), o.plan.mem.capGB, esc(o.reason)].join(','))].join('\n')
+  return [head, ...opts.map((o, i) => [i + 1, o.ok, esc(o.plan.device.name), o.plan.count, o.plan.tp, o.plan.pp, o.replicas, o.totalDevices, o.aggTokS.toFixed(1), o.plan.decode.ms.toFixed(2), o.plan.ttftMs.toFixed(0), o.perHour.toFixed(3), o.usdPerMTok.toFixed(3), o.plan.cost.capex * o.replicas, o.tokPerJ.toFixed(3), o.plan.mem.usedGB.toFixed(2), o.plan.mem.capGB, esc(o.reason)].join(','))].join('\n')
 }
 
 export function useSearch(p: Project) {
@@ -42,7 +42,7 @@ export default function SearchTab({ p, update }: { p: Project; update: Update })
           <NumField label="Time to first token at most" suffix="ms" value={p.targets.maxTtftMs} min={1} step={100} onChange={v => t({ maxTtftMs: v })} />
           <label className="field"><span>Vendor</span><select value={vendor} onChange={e => setVendor(e.target.value)}><option value="all">All</option>{vendors.map(v => <option key={v}>{v}</option>)}</select></label>
         </div>
-        <p className="muted small">{fmtNum(p.targets.maxTpotMs ? 1000 / p.targets.maxTpotMs : 0, 0)} tok/s per sequence is the floor implied by the latency target. Options add data-parallel replicas (up to 8) when one mesh is too slow.</p>
+        <p className="muted small">{fmtNum(p.targets.maxTpotMs ? 1000 / p.targets.maxTpotMs : 0, 0)} tok/s per sequence is the floor implied by the latency target. Options add data-parallel replicas (up to 8, never more than the concurrent sequences) when one mesh is too slow.</p>
       </div>
 
       <div className="row between wrap gap-sm">
@@ -84,7 +84,7 @@ export function OptionTable({ opts, onUse, current, print }: { opts: SearchOptio
                 <td className="num">{fmtUsd(o.perHour, 2)}</td>
                 <td className="num">{fmtUsd(o.usdPerMTok, 2)}</td>
                 <td className="num">{fmtUsd(o.plan.cost.capex * o.replicas)}</td>
-                <td className="num">{fmtNum(o.plan.cost.tokPerJ, 2)}</td>
+                <td className="num">{fmtNum(o.tokPerJ, 2)}</td>
                 {!print && <td>{isCur ? <span className="badge on">current</span> : onUse && <button type="button" className="btn ghost sm" onClick={() => onUse(o)}>Use</button>}</td>}
               </tr>
             )

@@ -174,15 +174,17 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #4.
   test('search does not count more replicas than there are concurrent sequences', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/4: 6 idle replicas "meet" the throughput target')
     await openSample(page, 'Llama 3.3 70B')
     await selectOf(page, 'Weights').selectOption('bf16')
     await inputOf(page, 'Concurrent seqs').fill('1')
     await page.getByRole('link', { name: 'Search', exact: true }).click()
-    const first = page.locator('table').first().locator('tbody tr').first()
+    await expect(page.getByRole('heading', { name: 'Nothing meets every target' })).toBeVisible()
+    const rows = page.locator('table').first().locator('tbody tr')
+    const first = rows.first()
     await expect(first).toBeVisible()
-    // "6 x 1x Instinct MI300X": the leading number is the replica count. One sequence can use one replica.
-    const replicas = Number((await first.innerText()).match(/^\s*\d+\s+(\d+) x /)?.[1] ?? 1)
-    expect(replicas).toBeLessThanOrEqual(1)
+    for (const text of await rows.allInnerTexts()) {
+      const replicas = Number(text.match(/^\s*\d+\s+(\d+) x /)?.[1] ?? 1)
+      expect(replicas).toBeLessThanOrEqual(1)
+    }
   })
 })
