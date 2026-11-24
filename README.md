@@ -27,8 +27,19 @@ npm install
 npm run dev      # http://localhost:5173
 npm test         # engine tests
 npm run build
+npm run test:e2e # browser tests against the production build (see below)
 ```
 
 Copy `.env` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` to enable sync; without it the app runs local-only.
+
+## Tests
+
+- `npm test`: engine unit tests (`node --test`).
+- `npm run test:e2e`: builds the app, serves it with `vite preview` and runs the Playwright (Chromium) suite in `e2e/`. One-time setup: `npx playwright install chromium` (on Linux add `--with-deps`). The server listens on `127.0.0.1:4173`; set `E2E_PORT` to use another port (`E2E_PORT=4510 npm run test:e2e`). The port must be free, the run never attaches to an existing server. Run a single file with `npx playwright test e2e/fit-math.spec.ts` after `npm run build`.
+- The suite runs signed out with a fresh browser profile per test. Every request to a host other than the preview server is aborted (Hugging Face is stubbed per test), and a test fails on any uncaught page error. It checks the memory-fit numbers against hand-worked values, config.json import (paste, file, Hub), rejected and truncated input, snapshots, compare, plan JSON export and re-import, CSV downloads, and that state survives a reload.
+- A few tests are marked `test.fail()` with a link to the open bug they document; they flip to a failure when the bug is fixed, which is the cue to delete the marker.
+- CI (`.github/workflows/ci.yml`, job `test`) runs `npm ci`, build, unit tests and the E2E suite on every pull request and push to `main`; failed runs upload the Playwright report.
+
+Preview deployments are off (`vercel.json` `git.deploymentEnabled`): only pushes to `main` deploy, and pull requests are gated by CI instead.
 
 Built by Aryan Kansagara.
