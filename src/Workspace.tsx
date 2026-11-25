@@ -58,7 +58,7 @@ export default function Workspace() {
                   <p className="muted small">{m?.name ?? 'Model config needs fixing'} · {r ? `${r.count}x ${projectDevice(p).name}` : ''}</p>
                   {r && <Mesh tp={r.tp} pp={r.pp} fill={{ weightsGB: r.mem.weightsGB, kvGB: r.mem.kvGB, reserveGB: r.mem.reserveGB, capGB: r.mem.capGB }} compact maxTiles={16} />}
                   <div className="proj-meta">
-                    {r ? <><span className={r.mem.fits ? 'ok-t' : 'bad-t'}>{r.mem.fits ? 'Fits' : 'Does not fit'}</span><span>{fmtNum(r.decode.tokS)} tok/s</span><span>{p.snapshots.length} saved</span></> : <span className="bad-t">Fix the model config</span>}
+                    {r ? <><span className={r.mem.fits ? 'ok-t' : 'bad-t'}>{r.mem.fits ? 'Fits' : 'Does not fit'}</span><span>{fmtNum(r.decode.tokS)} tok/s</span><span>{p.snapshots.length} saved</span></> : <span className="bad-t">{m ? 'Plan data is not valid' : 'Fix the model config'}</span>}
                   </div>
                 </Link>
                 <div className="row gap-sm proj-actions">

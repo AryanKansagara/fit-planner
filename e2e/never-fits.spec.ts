@@ -148,7 +148,6 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #3.
   test('an imported plan with an illegal split is not reported as fitting', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/3: import accepts tp 3 for 32 heads and reports Fits')
     const cfg = '{"model_type":"llama","hidden_size":4096,"num_hidden_layers":32,"num_attention_heads":32,"num_key_value_heads":8,"intermediate_size":14336,"vocab_size":128256,"max_position_embeddings":131072}'
     const plan = { format: 'fit-planner/plan@1', plan: { name: 'Illegal split', model: { kind: 'paste', config: cfg, at: 0 }, workload: { weightDtype: 'bf16', kvDtype: 'bf16', context: 8192, batch: 1, promptLen: 1000, outputLen: 200 }, tp: 3, pp: 1 } }
     await page.goto('/app')
@@ -161,28 +160,58 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #2: kept apart so a crash cannot take other tests down; the page must survive the import.
   test('an imported plan with an unknown weight dtype is refused, not stored', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/2: the import is stored and blanks the app')
     const cfg = '{"model_type":"llama","hidden_size":4096,"num_hidden_layers":32,"num_attention_heads":32,"num_key_value_heads":8,"intermediate_size":14336,"vocab_size":128256,"max_position_embeddings":131072}'
     const plan = { format: 'fit-planner/plan@1', plan: { name: 'Odd dtype', model: { kind: 'paste', config: cfg, at: 0 }, workload: { weightDtype: 'zz', kvDtype: 'bf16', context: 8192, batch: 1, promptLen: 1000, outputLen: 200 }, tp: 1, pp: 1 } }
     await page.goto('/app')
     await page.getByRole('button', { name: 'Import plan JSON' }).click()
     await page.locator('dialog textarea').fill(JSON.stringify(plan))
     await page.getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.locator('dialog .issues')).toBeVisible()
+    await expect(page.locator('dialog .issues')).toContainText('plan.workload.weightDtype must be one of bf16, fp8, int8, bfp8, bfp4, q4 (got "zz").')
     await expect(page).toHaveURL(/\/app$/)
+    await page.reload()
+    await expect(page.getByText('No plans yet')).toBeVisible()
+  })
+
+  // Plans stored by the old importer: the list must render so they can be deleted.
+  test('a stored plan with an unknown weight dtype is explained and can be deleted', async ({ page }) => {
+    await openSample(page, 'Llama 3.1 8B')
+    const url = page.url()
+    await page.evaluate(() => new Promise<void>((res, rej) => {
+      const open = indexedDB.open('fit-planner', 1)
+      open.onerror = () => rej(open.error)
+      open.onsuccess = () => {
+        const store = open.result.transaction('projects', 'readwrite').objectStore('projects')
+        const all = store.getAll()
+        all.onsuccess = () => {
+          const put = store.put({ ...all.result[0], workload: { ...all.result[0].workload, weightDtype: 'zz' } })
+          put.onsuccess = () => { open.result.close(); res() }
+        }
+      }
+    }))
+    for (const tab of ['', '/search', '/hardware', '/history', '/report']) {
+      await page.goto(url + tab)
+      await expect(page.locator('.issues')).toContainText('plan.workload.weightDtype must be one of')
+      await expect(page.locator('body')).not.toContainText('Fits')
+    }
+    await page.getByRole('link', { name: 'Back to plans' }).click()
+    await expect(page.locator('.proj')).toContainText('Plan data is not valid')
+    await page.locator('.proj').getByRole('button', { name: 'Delete' }).click()
+    await expect(page.getByText('No plans yet')).toBeVisible()
   })
 
   // Issue #4.
   test('search does not count more replicas than there are concurrent sequences', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/4: 6 idle replicas "meet" the throughput target')
     await openSample(page, 'Llama 3.3 70B')
     await selectOf(page, 'Weights').selectOption('bf16')
     await inputOf(page, 'Concurrent seqs').fill('1')
     await page.getByRole('link', { name: 'Search', exact: true }).click()
-    const first = page.locator('table').first().locator('tbody tr').first()
+    await expect(page.getByRole('heading', { name: 'Nothing meets every target' })).toBeVisible()
+    const rows = page.locator('table').first().locator('tbody tr')
+    const first = rows.first()
     await expect(first).toBeVisible()
-    // "6 x 1x Instinct MI300X": the leading number is the replica count. One sequence can use one replica.
-    const replicas = Number((await first.innerText()).match(/^\s*\d+\s+(\d+) x /)?.[1] ?? 1)
-    expect(replicas).toBeLessThanOrEqual(1)
+    for (const text of await rows.allInnerTexts()) {
+      const replicas = Number(text.match(/^\s*\d+\s+(\d+) x /)?.[1] ?? 1)
+      expect(replicas).toBeLessThanOrEqual(1)
+    }
   })
 })
