@@ -119,7 +119,10 @@ const changeHooks = new Set<(p: Project) => void>()
 export const onProjectChange = (f: (p: Project) => void) => { changeHooks.add(f); return () => changeHooks.delete(f) }
 
 export async function loadProjects() {
-  projects = (await idbGetAll<Project>('projects')).sort((a, b) => b.updatedAt - a.updatedAt)
+  const stored = await idbGetAll<Project>('projects')
+  // A plan whose write is still in flight is newer in memory than what was just read.
+  const unsaved = projects.filter(p => writing.has(p.id))
+  projects = [...stored.filter(p => !writing.has(p.id)), ...unsaved].sort((a, b) => b.updatedAt - a.updatedAt)
   loaded = true
   emit()
 }
@@ -131,14 +134,20 @@ export function useProjects() {
 export const getProjects = () => projects
 export const getProject = (id: string) => projects.find(p => p.id === id)
 
+/** Latest version of each plan whose IndexedDB write has not finished. */
+const writing = new Map<string, Project>()
+
+/** Updates the in-memory plan at once (inputs bound to it must not lag behind typing), then writes it. */
 export async function saveProject(p: Project, opts: { touch?: boolean; silent?: boolean } = {}) {
   const next = opts.touch === false ? p : { ...p, updatedAt: Date.now() }
-  await idbPut('projects', next)
   const i = projects.findIndex(x => x.id === p.id)
   if (i >= 0) projects[i] = next
   else projects.unshift(next)
   projects.sort((a, b) => b.updatedAt - a.updatedAt)
   emit()
+  writing.set(next.id, next)
+  await idbPut('projects', next)
+  if (writing.get(next.id) === next) writing.delete(next.id)
   if (!opts.silent) changeHooks.forEach(f => f(next))
   return next
 }

@@ -79,7 +79,6 @@ test.describe('pages, navigation and keyboard', () => {
 
   // Issue #9.
   test('the plan name keeps every character typed in quick succession', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/9: keystrokes are dropped until the IndexedDB write finishes')
     await openSample(page, 'Llama 3.1 8B')
     const name = page.getByLabel('Plan name')
     await name.click()
@@ -87,6 +86,40 @@ test.describe('pages, navigation and keyboard', () => {
     await page.keyboard.type('Homelab rack number two')
     await page.waitForTimeout(500)
     await expect(name).toHaveValue('Homelab rack number two')
+    // Typing in the middle keeps the caret there, and what is shown is what was stored.
+    for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft')
+    await page.keyboard.type('(spare) ')
+    await expect(name).toHaveValue('Homelab rack number(spare)  two')
+    await page.waitForTimeout(500)
+    await page.reload()
+    await expect(name).toHaveValue('Homelab rack number(spare)  two')
+  })
+
+  test('a snapshot label keeps every character typed in quick succession', async ({ page }) => {
+    await openSample(page, 'Llama 3.1 8B')
+    await page.getByRole('button', { name: 'Save snapshot' }).click()
+    await page.getByRole('link', { name: /History/ }).click()
+    const label = page.getByLabel('Snapshot label')
+    await label.click()
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('Candidate A for the rack')
+    await page.waitForTimeout(500)
+    await expect(label).toHaveValue('Candidate A for the rack')
+    await page.reload()
+    await expect(label).toHaveValue('Candidate A for the rack')
+  })
+
+  test('a sample link opens its plan on a fresh profile, and it is stored', async ({ page }) => {
+    // The plan is created while the stored list is still being read; that read must not drop it.
+    for (let i = 0; i < 5; i++) {
+      await page.goto('/app?sample=llama-3.1-8b&workload=team-chat')
+      await expect(page).toHaveURL(/\/app\/p\/[\w-]+$/)
+      await expect(page.locator('.fit-banner')).toBeVisible()
+      await page.reload()
+      await expect(page.locator('.fit-banner')).toBeVisible()
+    }
+    await page.goto('/app')
+    await expect(page.locator('.proj')).toHaveCount(5)
   })
 
   test('docs and settings pages mention what the planner computes', async ({ page }) => {
