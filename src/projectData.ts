@@ -1,6 +1,6 @@
 import { mergeDevices, validateDevice, DEVICES } from './engine/hardware.ts'
 import { KV_BYTES, parseConfig, paramCounts, type ParseResult } from './engine/model.ts'
-import { evaluate, minDevices, type PlanResult } from './engine/plan.ts'
+import { evaluate, minDevices, validTp, type PlanResult } from './engine/plan.ts'
 import { MODEL_SAMPLES, WORKLOAD_SAMPLES } from './engine/samples.ts'
 import { DTYPES, type Device, type ModelSpec, type Targets, type Workload } from './engine/types.ts'
 import { getDefaults, saveProject, uuid, type Project, type Snapshot } from './store.ts'
@@ -151,5 +151,27 @@ export function importPlanJson(text: string): PlanImport {
   errors.push(...planDataErrors(project))
   const r = parseProjectModel(project)
   if (!r.spec) errors.push(`The plan's model config does not parse: ${r.issues.find(i => i.level === 'error')?.message ?? 'unknown error'}`)
+  else if (!errors.length) errors.push(...planLimitErrors(project, r.spec))
   return { project: errors.length ? null : project, errors }
+}
+
+/** The limits the Plan tab itself enforces: a layout the model and device allow, and a workload within its fields' ranges. */
+function planLimitErrors(p: Project, m: ModelSpec): string[] {
+  const errs: string[] = []
+  const range = (field: 'context' | 'batch' | 'promptLen' | 'outputLen', min: number, max: number, whole: boolean) => {
+    const v = p.workload[field]
+    if (v < min || v > max || (whole && !Number.isInteger(v))) errs.push(`plan.workload.${field} must be ${whole ? 'a whole number ' : ''}between ${min} and ${max.toLocaleString('en-US')} (got ${v}).`)
+  }
+  range('context', 128, 10_000_000, false)
+  range('batch', 1, 4096, true)
+  range('promptLen', 1, 10_000_000, true)
+  range('outputLen', 1, 1_000_000, true)
+
+  const device = projectDevices(p).find(d => d.id === p.deviceId)
+  if (!device) errs.push(`plan.deviceId ${JSON.stringify(p.deviceId)} is not a known or custom device.`)
+  if (!Number.isInteger(p.tp) || !Number.isInteger(p.pp)) return [...errs, `plan.tp and plan.pp must be whole numbers (got ${p.tp} and ${p.pp}).`]
+  if (!validTp(m, p.tp)) errs.push(`plan.tp (${p.tp}) does not divide ${m.heads} attention heads${m.mla ? '' : ` / ${m.kvHeads} KV heads`} evenly.`)
+  if (p.pp > m.layers) errs.push(`plan.pp (${p.pp}) exceeds the model's ${m.layers} layers.`)
+  if (device && p.tp * p.pp > device.maxCount) errs.push(`${p.tp * p.pp} devices (plan.tp ${p.tp} x plan.pp ${p.pp}) is more than the ${device.maxCount} that ${device.name} is meshed in.`)
+  return errs
 }
