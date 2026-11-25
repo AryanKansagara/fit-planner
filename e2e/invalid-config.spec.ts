@@ -140,10 +140,15 @@ test.describe('unknown fields are flagged, never silently treated as zero', () =
 
   // Issue #6.
   test('derived assumptions are never reported as NaN', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/6: messages read "assumed NaN"')
     await newBlankPlan(page)
     await page.getByRole('button', { name: 'Paste config.json' }).click()
     await page.getByLabel('config.json contents').fill('{}')
-    await expect(page.locator('.validation')).not.toContainText('NaN')
+    const validation = page.locator('.validation')
+    await expect(validation).toContainText('Head dim: head_dim missing and cannot be derived (hidden size / heads) because hidden_size and num_attention_heads are missing or invalid.')
+    await expect(validation).toContainText('KV heads: num_key_value_heads missing and cannot be derived')
+    await expect(validation).not.toContainText('NaN')
+    await validation.getByText('Field mapping').click()
+    await expect(validation.locator('table')).not.toContainText('NaN')
+    await expect(page.getByRole('button', { name: 'Use this model' })).toBeDisabled()
   })
 })
