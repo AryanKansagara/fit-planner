@@ -151,7 +151,6 @@ test.describe('import a config.json', () => {
 
   // Issue #5: the draft from an earlier fetch survives a failed one.
   test('a failed fetch discards the earlier draft', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/5: the earlier draft and its Use this model button stay')
     let status = 200
     await stubHub(page, route => status === 200 ? route.fulfill({ status, body: json(LLAMA_8B) }) : route.fulfill({ status, body: 'nope' }))
     await newBlankPlan(page)
@@ -167,7 +166,6 @@ test.describe('import a config.json', () => {
 
   // Issue #5, second half.
   test('emptying the paste box discards the draft', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/5: the draft stays after the box is emptied')
     await newBlankPlan(page)
     await page.getByRole('button', { name: 'Paste config.json' }).click()
     const box = page.getByLabel('config.json contents')
@@ -175,6 +173,40 @@ test.describe('import a config.json', () => {
     await expect(page.locator('.sticky-apply')).toContainText('Ready')
     await box.fill('')
     await expect(page.getByRole('button', { name: 'Use this model' })).toHaveCount(0)
+    // Whitespace counts as empty, and typing again brings a draft back.
+    await box.fill(json(NAMED))
+    await expect(page.locator('.sticky-apply')).toContainText('Ready')
+    await box.fill('  \n ')
+    await expect(page.getByRole('button', { name: 'Use this model' })).toHaveCount(0)
+  })
+
+  test('an input that is not a repo id also discards the earlier draft', async ({ page }) => {
+    await stubHub(page, route => route.fulfill({ status: 200, body: json(LLAMA_8B) }))
+    await newBlankPlan(page)
+    await page.getByLabel('Repo id or URL').fill('acme/Test-8B')
+    await page.getByRole('button', { name: 'Fetch config.json' }).click()
+    await expect(page.locator('.sticky-apply')).toContainText('Ready: acme/Test-8B')
+    await page.getByLabel('Repo id or URL').fill('not a repo')
+    await page.getByRole('button', { name: 'Fetch config.json' }).click()
+    await expect(page.getByRole('alert')).toContainText('Enter a repo id')
+    await expect(page.getByRole('button', { name: 'Use this model' })).toHaveCount(0)
+  })
+
+  test('a slow fetch does not replace a config pasted in the meantime', async ({ page }) => {
+    let release = () => {}
+    const held = new Promise<void>(r => { release = r })
+    await stubHub(page, async route => { await held; await route.fulfill({ status: 200, body: json(LLAMA_8B) }) })
+    await newBlankPlan(page)
+    await page.getByLabel('Repo id or URL').fill('acme/Slow-8B')
+    await page.getByRole('button', { name: 'Fetch config.json' }).click()
+    await page.getByRole('button', { name: 'Paste config.json' }).click()
+    await page.getByLabel('config.json contents').fill(json(NAMED))
+    const ready = await page.locator('.sticky-apply').innerText()
+    const done = page.waitForResponse(/huggingface\.co/)
+    release()
+    await done
+    await page.waitForTimeout(300)
+    expect(await page.locator('.sticky-apply').innerText()).toBe(ready)
   })
 
   test('manual entry writes a config.json that goes through the same validation', async ({ page }) => {

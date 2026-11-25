@@ -328,3 +328,32 @@ test('device edits override the curated table by id; validation and CSV quoting'
   assert.ok(csv.includes('"Box, ""v2"""'))
   assert.equal(csv.split('\n').length, merged.length + 1)
 })
+
+test('search caps data-parallel replicas at concurrent sequences', () => {
+  const m = spec('llama-3.3-70b')
+  const opts = search(m, wl({ weightDtype: 'bf16', batch: 1, promptLen: 2000, outputLen: 300 }), DEVICES, A, { minTokS: 160, maxTpotMs: 50, maxTtftMs: 1500 })
+  assert.equal(opts.filter(o => o.ok).length, 0)
+  for (const o of opts) assert.equal(o.replicas, 1)
+  const mi300x = opts.find(o => o.plan.device.id === 'amd-mi300x' && o.plan.count === 1)!
+  assert.equal(mi300x.ok, false)
+  assert.match(mi300x.reason, /under 160/)
+
+  for (const b of [0, 1, 2, 3, 5, 7, 12]) {
+    for (const t of [200, 500, 10_000]) {
+      for (const o of search(spec('llama-3.1-8b'), wl({ batch: b }), [dev('tt-n150s')], A, { minTokS: t, maxTpotMs: 1000, maxTtftMs: 60000 })) {
+        assert.ok(o.replicas <= Math.max(1, b), `batch=${b} got replicas=${o.replicas}`)
+        near(o.aggTokS, Math.max(1, b) * 1000 / o.plan.decode.ms, 1e-9, `batch=${b} counts only real sequences`)
+        near(o.tokPerJ, o.aggTokS / (o.totalDevices * 160), 1e-9)
+      }
+    }
+  }
+})
+
+test('an uneven split of sequences does not count the spare slots', () => {
+  // 3 sequences on 2 replicas run as 2 + 1; counting both as 2 would report 4 sequences' worth of tokens.
+  const one = search(spec('llama-3.1-8b'), wl({ batch: 3 }), [dev('tt-n150s')], A, { minTokS: 0, maxTpotMs: 1e9, maxTtftMs: 1e9 }).find(o => o.plan.count === 4)!
+  assert.equal(one.replicas, 1)
+  const two = search(spec('llama-3.1-8b'), wl({ batch: 3 }), [dev('tt-n150s')], A, { minTokS: one.aggTokS * 1.01, maxTpotMs: 1e9, maxTtftMs: 1e9 }).find(o => o.plan.count === 4)!
+  if (two.replicas === 2) near(two.aggTokS, two.plan.decode.tokS * 1.5, 1e-9)
+  assert.ok(!two.ok || two.aggTokS >= one.aggTokS * 1.01)
+})
