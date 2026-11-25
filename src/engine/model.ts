@@ -50,7 +50,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   const modelType = String(o.model_type ?? 'unknown')
   const arch = Array.isArray(o.architectures) && o.architectures.length ? String(o.architectures[0]) : modelType
 
-  const num = (field: string, label: string, keys: string[], fallback?: { value: number; why: string; level?: Issue['level'] }): number => {
+  const num = (field: string, label: string, keys: string[], fallback?: { value: number; why: string; level?: Issue['level']; needs?: Record<string, number> }): number => {
     for (const k of keys) {
       const v = o[k]
       if (typeof v === 'number' && Number.isFinite(v)) {
@@ -61,6 +61,12 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
       if (v !== undefined && v !== null) issues.push({ level: 'error', field, message: `${k} should be a number (got ${JSON.stringify(v)}).`, line: lineOf(text, k) })
     }
     if (fallback) {
+      // An input that is itself missing or invalid (and already reported) gives nothing to derive from.
+      const unusable = Object.entries(fallback.needs ?? {}).filter(([, v]) => !Number.isInteger(v) || v <= 0).map(([k]) => k)
+      if (unusable.length) {
+        issues.push({ level: fallback.level ?? 'warn', field, message: `${label}: ${keys[0]} missing and cannot be derived (${fallback.why}) because ${unusable.join(' and ')} ${unusable.length > 1 ? 'are' : 'is'} missing or invalid.` })
+        return NaN
+      }
       mapping.push({ field, label, value: fallback.value, source: `assumed: ${fallback.why}` })
       issues.push({ level: fallback.level ?? 'warn', field, message: `${label}: ${keys[0]} missing, assumed ${fallback.value} (${fallback.why}).` })
       return fallback.value
@@ -74,12 +80,12 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   const heads = num('heads', 'Attention heads', ['num_attention_heads', 'n_head', 'n_heads'])
   const kvHeads = num('kvHeads', 'KV heads', ['num_key_value_heads', 'n_head_kv', 'num_kv_heads', 'multi_query_group_num'], o.multi_query === true
     ? { value: 1, why: 'multi_query: true, one shared KV head', level: 'info' }
-    : { value: heads, why: 'no GQA field, so full multi-head attention' })
+    : { value: heads, why: 'no GQA field, so full multi-head attention', needs: { num_attention_heads: heads } })
   const isMla = typeof o.kv_lora_rank === 'number'
   const headDim = isMla
     ? Number(o.qk_nope_head_dim ?? 0) + Number(o.qk_rope_head_dim ?? 0)
-    : num('headDim', 'Head dim', ['head_dim', 'kv_channels'], { value: Math.round(hidden / heads), why: 'hidden size / heads', level: 'info' })
-  const intermediate = num('intermediate', 'MLP intermediate', typeof o.intermediate_size_mlp === 'number' ? ['intermediate_size_mlp'] : ['intermediate_size', 'n_inner', 'ffn_dim', 'ffn_hidden_size'], { value: 4 * hidden, why: '4 x hidden size' })
+    : num('headDim', 'Head dim', ['head_dim', 'kv_channels'], { value: Math.round(hidden / heads), why: 'hidden size / heads', level: 'info', needs: { hidden_size: hidden, num_attention_heads: heads } })
+  const intermediate = num('intermediate', 'MLP intermediate', typeof o.intermediate_size_mlp === 'number' ? ['intermediate_size_mlp'] : ['intermediate_size', 'n_inner', 'ffn_dim', 'ffn_hidden_size'], { value: 4 * hidden, why: '4 x hidden size', needs: { hidden_size: hidden } })
   const vocab = num('vocab', 'Vocabulary', ['vocab_size', 'padded_vocab_size'])
   const maxContext = num('maxContext', 'Max context', ['max_position_embeddings', 'n_positions', 'seq_length', 'max_sequence_length'], { value: 4096, why: 'no position limit in the config' })
 
@@ -100,7 +106,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
     const active = num('moe.active', 'Active experts per token', ['num_experts_per_tok', 'num_selected_experts', 'moe_topk', 'top_k'], { value: 2, why: 'common top-2 routing' })
     // Llama 4 names the expert width intermediate_size and the dense MLP width intermediate_size_mlp.
     const llama4 = typeof o.intermediate_size_mlp === 'number'
-    const expertInter = num('moe.expertInter', 'Expert intermediate', llama4 ? ['intermediate_size'] : ['moe_intermediate_size', 'expert_intermediate_size'], { value: intermediate, why: 'same as intermediate_size', level: 'info' })
+    const expertInter = num('moe.expertInter', 'Expert intermediate', llama4 ? ['intermediate_size'] : ['moe_intermediate_size', 'expert_intermediate_size'], { value: intermediate, why: 'same as intermediate_size', level: 'info', needs: { intermediate_size: intermediate } })
     let shared = 0, sharedInter = 0
     if (typeof o.n_shared_experts === 'number') { shared = num('moe.shared', 'Shared experts', ['n_shared_experts']); sharedInter = expertInter }
     else if (typeof o.shared_expert_intermediate_size === 'number' && o.shared_expert_intermediate_size > 0) { shared = 1; sharedInter = num('moe.sharedInter', 'Shared expert intermediate', ['shared_expert_intermediate_size']) }
@@ -113,7 +119,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
       const step = stepKey ? (o[stepKey] as number) : 1
       const only = Array.isArray(o.mlp_only_layers) ? new Set(o.mlp_only_layers as number[]) : new Set<number>()
       for (let i = 0; i < layers; i++) if ((i + 1) % step !== 0 || only.has(i)) denseLayers++
-      if (stepKey) issues.push({ level: 'info', message: `${stepKey} is ${step}: ${layers - denseLayers} of ${layers} layers use experts, the rest a dense MLP.`, line: lineOf(text, stepKey) })
+      if (stepKey && Number.isFinite(layers)) issues.push({ level: 'info', message: `${stepKey} is ${step}: ${layers - denseLayers} of ${layers} layers use experts, the rest a dense MLP.`, line: lineOf(text, stepKey) })
     }
     if (active > experts) issues.push({ level: 'error', field: 'moe.active', message: `Active experts (${active}) exceeds experts (${experts}).`, line: lineOf(text, 'num_experts_per_tok') })
     moe = { experts, active, expertInter, shared, sharedInter, denseLayers }
@@ -133,7 +139,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   }
 
   if (Number.isFinite(heads) && Number.isFinite(kvHeads) && heads % kvHeads !== 0) issues.push({ level: 'error', field: 'kvHeads', message: `Attention heads (${heads}) must be a multiple of KV heads (${kvHeads}).`, line: lineOf(text, 'num_key_value_heads') })
-  if (!mla && o.head_dim === undefined && Number.isFinite(hidden) && hidden % heads !== 0) issues.push({ level: 'warn', field: 'headDim', message: `hidden_size ${hidden} is not divisible by ${heads} heads; head_dim rounded.` })
+  if (!mla && o.head_dim === undefined && Number.isFinite(hidden) && heads > 0 && hidden % heads !== 0) issues.push({ level: 'warn', field: 'headDim', message: `hidden_size ${hidden} is not divisible by ${heads} heads; head_dim rounded.` })
   let window: ModelSpec['window']
   if (typeof o.sliding_window === 'number' && o.sliding_window > 0 && o.use_sliding_window !== false && Number.isFinite(layers)) {
     const size = o.sliding_window
