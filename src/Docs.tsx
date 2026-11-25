@@ -106,7 +106,7 @@ huggingface-cli download meta-llama/Llama-3.3-70B-Instruct config.json --local-d
         <h3>Cost, energy and search</h3>
         <ul>
           <li>Owned: price / (years x 8,760 h) + board watts x $/kWh. Rented: the listed hourly rate, falling back to owned where none is listed. $/1M tokens = hourly cost / (decode tok/s x 3,600) x 10⁶. Tokens per joule = decode tok/s / total board watts.</li>
-          <li>Search tries each device at 1, 2, 4, 8... cards up to its mesh limit, picks the fastest legal TP x PP split that fits, then adds data-parallel replicas (up to 8, sharing the concurrent sequences) until the throughput target is met. Options meeting every target are ranked by hourly cost.</li>
+          <li>Search tries each device at 1, 2, 4, 8... cards up to its mesh limit, picks the fastest legal TP x PP split that fits, then adds data-parallel replicas (up to 8 and never more than the concurrent sequences they share) until the throughput target is met. Options meeting every target are ranked by hourly cost.</li>
         </ul>
 
         <h2 id="plans">Plan files and CSV</h2>
