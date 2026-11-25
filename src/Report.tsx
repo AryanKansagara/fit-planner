@@ -3,8 +3,9 @@ import { HARDWARE_AS_OF } from './engine/hardware.ts'
 import { kvBytesPerToken, paramCounts } from './engine/model.ts'
 import { fmtMs } from './engine/plan.ts'
 import { DTYPES } from './engine/types.ts'
-import { projectPlan, projectSpec } from './projectData.ts'
+import { planDataErrors, projectPlan, projectSpec } from './projectData.ts'
 import { useProjects } from './store.ts'
+import { BrokenPlan } from './Project.tsx'
 import { OptionTable, searchCsv, useSearch } from './SearchTab.tsx'
 import { download, fmtB, fmtGB, fmtNum, fmtUsd, Link, Monogram, NotFound, ThemeToggle } from './ui.tsx'
 import { Mesh, MeshLegend } from './viz.tsx'
@@ -16,6 +17,8 @@ export default function Report({ id }: { id: string }) {
   useEffect(() => { if (p) document.title = `${p.name} report · Fit Planner` }, [p?.name])
   if (list === null) return <div className="boot" role="status"><span className="spinner" /> Loading</div>
   if (!p) return <NotFound />
+  const broken = planDataErrors(p)
+  if (broken.length) return <BrokenPlan name={p.name} errors={broken} />
   return <ReportBody p={p} />
 }
 

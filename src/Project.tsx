@@ -4,7 +4,7 @@ import { kvBytesPerToken, paramCounts } from './engine/model.ts'
 import { layoutsFor, meshSizes, minDevices, throughputCurve, fmtMs, DEFAULT_ASSUMPTIONS } from './engine/plan.ts'
 import { WORKLOAD_SAMPLES } from './engine/samples.ts'
 import { DTYPES, type Assumptions, type KvDtype, type WeightDtype, type Workload } from './engine/types.ts'
-import { autoLayout, parseProjectModel, planJson, projectDevice, projectDevices, projectPlan, snapshotOf } from './projectData.ts'
+import { autoLayout, parseProjectModel, planJson, planDataErrors, projectDevice, projectDevices, projectPlan, snapshotOf } from './projectData.ts'
 import { getProject, saveProject, useProjects, type Project, type Snapshot } from './store.ts'
 import { deleteSnapshotCloud } from './sync.ts'
 import { Code, CopyButton, download, Empty, fmtB, fmtDate, fmtGB, fmtNum, fmtUsd, go, isTyping, Link, Modal, NotFound, SyntheticBadge, toast } from './ui.tsx'
@@ -48,6 +48,8 @@ export default function ProjectView({ id, tab }: { id: string; tab: Tab }) {
 
   if (list === null) return <div className="boot" role="status"><span className="spinner" /> Loading</div>
   if (!p) return <NotFound />
+  const broken = planDataErrors(p)
+  if (broken.length) return <BrokenPlan name={p.name} errors={broken} />
   return (
     <section className="page">
       <div className="proj-head">
@@ -76,6 +78,18 @@ export default function ProjectView({ id, tab }: { id: string; tab: Tab }) {
       <Modal open={sharing} onClose={() => setSharing(false)} title="Share this plan" wide>
         <ShareBody p={p} />
       </Modal>
+    </section>
+  )
+}
+
+/** A stored plan the engine cannot size (an old import of a bad file, for example). Explains why instead of failing to render. */
+export function BrokenPlan({ name, errors }: { name: string; errors: string[] }) {
+  return (
+    <section className="page">
+      <Empty title={`${name} cannot be opened`}>
+        <ul className="issues">{errors.map(e => <li key={e} className="error">{e}</li>)}</ul>
+        <Link href="/app" className="btn primary">Back to plans</Link>
+      </Empty>
     </section>
   )
 }
