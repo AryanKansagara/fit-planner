@@ -1,8 +1,8 @@
-import { mergeDevices, DEVICES } from './engine/hardware.ts'
-import { parseConfig, paramCounts, type ParseResult } from './engine/model.ts'
+import { mergeDevices, validateDevice, DEVICES } from './engine/hardware.ts'
+import { KV_BYTES, parseConfig, paramCounts, type ParseResult } from './engine/model.ts'
 import { evaluate, minDevices, type PlanResult } from './engine/plan.ts'
 import { MODEL_SAMPLES, WORKLOAD_SAMPLES } from './engine/samples.ts'
-import type { Device, ModelSpec, Targets, Workload } from './engine/types.ts'
+import { DTYPES, type Device, type ModelSpec, type Targets, type Workload } from './engine/types.ts'
 import { getDefaults, saveProject, uuid, type Project, type Snapshot } from './store.ts'
 
 const parsed = new Map<string, ParseResult>()
@@ -19,8 +19,42 @@ export const projectSpec = (p: Pick<Project, 'model'>): ModelSpec | null => pars
 export const projectDevices = (p: Pick<Project, 'devices'>): Device[] => mergeDevices(p.devices)
 export const projectDevice = (p: Pick<Project, 'devices' | 'deviceId'>): Device => projectDevices(p).find(d => d.id === p.deviceId) ?? DEVICES[0]
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const finite = (o: unknown, keys: string[]) => isObj(o) && keys.every(k => typeof o[k] === 'number' && Number.isFinite(o[k]))
+const text = (o: unknown, keys: string[]) => isObj(o) && keys.every(k => typeof o[k] === 'string')
+
+function deviceOk(d: unknown): boolean {
+  if (!text(d, ['id', 'name', 'vendor', 'linkKind']) || !finite(d, ['memGB', 'bwGBs', 'linkGBs', 'linkLatencyUs', 'priceUsd', 'watts', 'maxCount'])) return false
+  const { tflops, rentPerHour } = d as Device
+  if (!finite(tflops, ['fp16']) || (tflops.fp8 !== undefined && !finite(tflops, ['fp8']))) return false
+  return (rentPerHour === undefined || (Number.isFinite(rentPerHour) && rentPerHour >= 0)) && validateDevice(d as Device).length === 0
+}
+
+const snapshotOk = (s: unknown) => isObj(s) && text(s, ['label', 'modelName', 'deviceName']) && finite(s, ['createdAt', 'count', 'tp', 'pp'])
+  && finite(s.workload, ['context', 'batch']) && text(s.workload, ['weightDtype', 'kvDtype'])
+  && finite(s.result, ['usedGB', 'tokS', 'perUserTokS', 'ttftMs', 'maxBatch', 'perHour', 'usdPerMTok', 'capex', 'tokPerJ'])
+
+/** Why a stored or imported plan cannot be sized. The planner never writes such data, but a hand-edited file can carry it. */
+export function planDataErrors(p: Project): string[] {
+  const errs: string[] = []
+  // Object.hasOwn: names such as "toString" must not pass as dtypes.
+  const dtype = (field: string, v: unknown, known: object) => {
+    if (typeof v !== 'string' || !Object.hasOwn(known, v)) errs.push(`plan.workload.${field} must be one of ${Object.keys(known).join(', ')} (got ${JSON.stringify(v) ?? 'nothing'}).`)
+  }
+  dtype('weightDtype', p.workload?.weightDtype, DTYPES)
+  dtype('kvDtype', p.workload?.kvDtype, KV_BYTES)
+  if (!finite(p.workload, ['context', 'batch', 'promptLen', 'outputLen'])) errs.push('plan.workload needs numbers for context, batch, promptLen and outputLen.')
+  if (!finite(p.targets, ['minTokS', 'maxTpotMs', 'maxTtftMs'])) errs.push('plan.targets needs numbers for minTokS, maxTpotMs and maxTtftMs.')
+  if (!finite(p.assumptions, ['bwUtil', 'mfu', 'linkUtil', 'reserveGB', 'reserveFrac', 'amortYears', 'kwhUsd'])) errs.push('plan.assumptions has a value that is not a number.')
+  if (p.model.repo !== undefined && typeof p.model.repo !== 'string') errs.push('plan.model.repo must be text.')
+  if (!Array.isArray(p.devices) || !p.devices.every(deviceOk)) errs.push('plan.devices has an entry that is not a valid device.')
+  if (!Array.isArray(p.snapshots) || !p.snapshots.every(snapshotOk)) errs.push('A saved snapshot is incomplete.')
+  return errs
+}
+
 export function projectPlan(p: Project): PlanResult | null {
   const m = projectSpec(p)
+  if (planDataErrors(p).length) return null
   return m ? evaluate(m, p.workload, { device: projectDevice(p), tp: p.tp, pp: p.pp }, p.assumptions) : null
 }
 
@@ -108,12 +142,13 @@ export function importPlanJson(text: string): PlanImport {
   const base = newProject(String(plan.name ?? 'Imported plan'))
   const now = Date.now()
   const project: Project = {
-    ...base, ...plan, id: base.id, createdAt: now, updatedAt: now,
+    ...base, ...plan, id: base.id, name: base.name, createdAt: now, updatedAt: now,
     assumptions: { ...base.assumptions, ...plan.assumptions }, targets: { ...base.targets, ...plan.targets },
     devices: Array.isArray(plan.devices) ? plan.devices : [],
     snapshots: Array.isArray(o.snapshots) ? (o.snapshots as Snapshot[]).map(s => ({ ...s, id: uuid() })) : [],
     sample: false,
   }
+  errors.push(...planDataErrors(project))
   const r = parseProjectModel(project)
   if (!r.spec) errors.push(`The plan's model config does not parse: ${r.issues.find(i => i.level === 'error')?.message ?? 'unknown error'}`)
   return { project: errors.length ? null : project, errors }
