@@ -33,6 +33,7 @@ export function validateDevice(d: Device): string[] {
   for (const [k, v] of [['Memory', d.memGB], ['Bandwidth', d.bwGBs], ['FP16 TFLOPS', d.tflops.fp16], ['Link bandwidth', d.linkGBs], ['Power', d.watts], ['Max cards', d.maxCount]] as const) {
     if (!(v > 0)) errs.push(`${k} must be greater than zero.`)
   }
+  if (d.maxCount > 0 && !Number.isInteger(d.maxCount)) errs.push('Max cards must be a whole number.')
   if (d.tflops.fp8 !== undefined && !(d.tflops.fp8 >= 0)) errs.push('FP8 TFLOPS must be zero or more.')
   if (!(d.priceUsd >= 0)) errs.push('Price must be zero or more.')
   if (!(d.linkLatencyUs >= 0)) errs.push('Link latency must be zero or more.')

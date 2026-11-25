@@ -85,7 +85,16 @@ function DeviceForm({ initial, onSave, onCancel }: { initial: Device; onSave(d: 
   const errs = validateDevice(d)
   const set = (patch: Partial<Device>) => setD(x => ({ ...x, ...patch }))
   return (
-    <form className="stack" onSubmit={e => { e.preventDefault(); if (!errs.length) onSave(d) }}>
+    <form className="stack" noValidate onSubmit={e => {
+      e.preventDefault()
+      // The steps of the number fields are for their spinners; any other broken constraint still blocks the save.
+      const bad = [...e.currentTarget.querySelectorAll('input')].find(i => {
+        const v = i.validity
+        return v.badInput || v.valueMissing || v.rangeUnderflow || v.rangeOverflow
+      })
+      if (bad) bad.reportValidity()
+      else if (!errs.length) onSave(d)
+    }}>
       <div className="row gap-sm wrap">
         <label className="field grow"><span>Name</span><input value={d.name} onChange={e => set({ name: e.target.value })} required /></label>
         <label className="field"><span>Vendor</span><input value={d.vendor} onChange={e => set({ vendor: e.target.value })} /></label>
@@ -100,7 +109,7 @@ function DeviceForm({ initial, onSave, onCancel }: { initial: Device; onSave(d: 
         <NumField label="Price" suffix="USD" value={d.priceUsd} step={50} onChange={v => set({ priceUsd: v })} />
         <NumField label="Rental (0 = none)" suffix="$/h" value={d.rentPerHour ?? 0} step={0.05} onChange={v => set({ rentPerHour: v || undefined })} />
         <NumField label="Board power" suffix="W" value={d.watts} step={10} onChange={v => set({ watts: v })} />
-        <NumField label="Max cards in a mesh" value={d.maxCount} min={1} max={256} onChange={v => set({ maxCount: Math.round(v) })} />
+        <NumField label="Max cards in a mesh" value={d.maxCount} min={1} max={256} onChange={v => set({ maxCount: v })} />
       </div>
       <label className="field"><span>Interconnect description</span><input value={d.linkKind} onChange={e => set({ linkKind: e.target.value })} placeholder="PCIe 4.0 x16, 400G Ethernet, NVLink" /></label>
       {errs.length > 0 && <ul className="issues" role="alert">{errs.map(e => <li key={e} className="error small">{e}</li>)}</ul>}

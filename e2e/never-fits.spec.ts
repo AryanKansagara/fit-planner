@@ -86,12 +86,49 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #8.
   test('the custom device form saves with its default values', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/8: 500 GB/s fails the step=8 check, so Save device does nothing')
     await openSample(page, 'Llama 3.1 8B')
     await page.getByRole('link', { name: 'Hardware', exact: true }).click()
     await page.getByRole('button', { name: 'Add custom device' }).click()
     await page.locator('dialog[open]').getByRole('button', { name: 'Save device' }).click()
     await expect(page.locator('.toasts')).toContainText('Added My accelerator.')
+  })
+
+  test('device values between the spinner steps save; out-of-range and fractional counts do not', async ({ page }) => {
+    await openSample(page, 'Llama 3.1 8B')
+    await page.getByRole('link', { name: 'Hardware', exact: true }).click()
+    const p150a = page.locator('tbody tr', { hasText: 'Blackhole p150a' })
+    const dialog = page.locator('dialog[open]')
+    const save = dialog.getByRole('button', { name: 'Save device' })
+    // A published price that is no multiple of 50.
+    await p150a.getByRole('button', { name: 'Edit' }).click()
+    await save.click()
+    await expect(page.locator('.toasts')).toContainText('Saved your edits to Blackhole p150a for this plan.')
+
+    await p150a.getByRole('button', { name: 'Edit' }).click()
+    await dialog.getByLabel('Memory bandwidth').fill('450.5')
+    await dialog.getByLabel('Max cards in a mesh').fill('2.5')
+    await expect(dialog.getByRole('alert')).toContainText('Max cards must be a whole number.')
+    await expect(save).toBeDisabled()
+    await dialog.getByLabel('Max cards in a mesh').fill('8')
+    await dialog.getByLabel('Price').fill('-5')
+    await save.click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Price').fill('1234.5')
+    await dialog.getByLabel('Max cards in a mesh').fill('300')
+    await save.click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Max cards in a mesh').fill('8')
+    // The arrow keys still move by the field's step.
+    await dialog.getByLabel('Memory bandwidth').press('ArrowUp')
+    await expect(dialog.getByLabel('Memory bandwidth')).toHaveValue('456')
+    await dialog.getByLabel('Memory bandwidth').fill('450.5')
+    await dialog.getByLabel('Name').fill('')
+    await expect(save).toBeDisabled()
+    await dialog.getByLabel('Name').fill('Blackhole p150a')
+    await save.click()
+    await expect(dialog).toHaveCount(0)
+    await expect(p150a).toContainText('451 GB/s')
+    await expect(p150a).toContainText('$1,235')
   })
 
   test('search lists no option that overflows its memory', async ({ page }) => {
@@ -120,11 +157,11 @@ test.describe('a model that does not fit is never shown as fitting', () => {
     await hero.locator('input[type=range]').first().focus()
     await page.keyboard.press('End')
     await expect(hero.locator('.hc-controls label').first()).toContainText('DeepSeek V3')
-    // 671B at BFP8 is 713 GB: 32 x 24 GB RTX 4090s hold 768 GB raw but 26.5 GB per card is over 24 GB.
+    // 671B at BFP8 is 713 GB; the RTX 4090 is meshed in at most 8 cards (192 GB).
     await hero.getByRole('button', { name: /4090/ }).click()
-    await expect(hero.locator('.hc-caption strong')).toHaveText('Does not fit on 32x GeForce RTX 4090')
+    await expect(hero.locator('.hc-caption strong')).toHaveText('Does not fit on 8x GeForce RTX 4090')
     await expect(hero.locator('.hc-caption strong.bad-t')).toBeVisible()
-    await expect(hero).toContainText('add cards or shrink the dtype')
+    await expect(hero).toContainText('try another card or a smaller dtype')
     await expect(hero.getByLabel(/tok\/s/).first()).toBeDefined()
     // The smallest model on a card it fits: shows a count, not "Does not fit".
     await hero.locator('input[type=range]').first().focus()
@@ -134,7 +171,6 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #7.
   test('landing demo respects the device\'s own mesh limit', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/7: the demo sizes every device up to 32 cards')
     await page.goto('/')
     const hero = page.locator('.hero-card')
     await hero.locator('input[type=range]').first().focus()
@@ -144,6 +180,18 @@ test.describe('a model that does not fit is never shown as fitting', () => {
     const caption = await hero.locator('.hc-caption strong').innerText()
     const count = Number(caption.match(/(\d+)x Blackhole p100a/)?.[1] ?? 0)
     expect(count).toBeLessThanOrEqual(4)
+    await expect(hero.locator('.hc-caption strong')).toHaveText('Does not fit on 4x Blackhole p100a')
+    // At every model size, each card stays within its own limit, and the p150a still reaches 32.
+    for (const [button, max] of [['p100a', 4], ['n300s', 8], ['4090', 8], ['p150a', 32]] as const) {
+      await hero.getByRole('button', { name: new RegExp(button) }).click()
+      const slider = hero.locator('input[type=range]').first()
+      const models = Number(await slider.getAttribute('max'))
+      for (let i = 0; i <= models; i++) {
+        await slider.fill(String(i))
+        const n = Number((await hero.locator('.hc-caption strong').innerText()).match(/(\d+)x /)![1])
+        expect(n, `${button}, model ${i}`).toBeLessThanOrEqual(max)
+      }
+    }
   })
 
   // Issue #3.
