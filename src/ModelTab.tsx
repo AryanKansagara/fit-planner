@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { kvBytesPerToken, manualSpec, paramCounts, parseConfig, specToConfig } from './engine/model.ts'
 import { MODEL_SAMPLES } from './engine/samples.ts'
 import { autoLayout, parseProjectModel } from './projectData.ts'
@@ -45,8 +45,8 @@ export default function ModelTab({ p, update }: { p: Project; update: Update }) 
             ))}
           </div>
           {src === 'sample' && <SamplePicker onPick={s => setDraft({ text: s.config, repo: s.repo, kind: 'sample', sampleId: s.id })} selected={draft?.sampleId ?? p.model.sampleId} />}
-          {src === 'hf' && <HfFetch onFetched={(t, repo) => setDraft({ text: t, repo, kind: 'hf' })} />}
-          {src === 'paste' && <Paste onText={t => setDraft({ text: t, kind: 'paste' })} />}
+          {src === 'hf' && <HfFetch onStart={() => setDraft(null)} onFetched={(t, repo) => setDraft({ text: t, repo, kind: 'hf' })} />}
+          {src === 'paste' && <Paste onText={t => setDraft({ text: t, kind: 'paste' })} onEmpty={() => setDraft(d => d?.kind === 'paste' ? null : d)} />}
           {src === 'manual' && <Manual onSpec={t => setDraft({ text: t, kind: 'manual' })} />}
         </div>
 
@@ -83,10 +83,14 @@ function SamplePicker({ onPick, selected }: { onPick(s: typeof MODEL_SAMPLES[num
   )
 }
 
-function HfFetch({ onFetched }: { onFetched(text: string, repo: string): void }) {
+function HfFetch({ onStart, onFetched }: { onStart(): void; onFetched(text: string, repo: string): void }) {
   const [input, setInput] = useState('')
   const [state, setState] = useState<{ busy: boolean; err: string | null }>({ busy: false, err: null })
+  // A fetch that finishes after the user moved to another source must not replace what they entered there.
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const go = async () => {
+    onStart()
     const repo = repoFromInput(input)
     if (!repo) { setState({ busy: false, err: 'Enter a repo id like Qwen/Qwen3-14B or a huggingface.co model URL.' }); return }
     setState({ busy: true, err: null })
@@ -96,6 +100,7 @@ function HfFetch({ onFetched }: { onFetched(text: string, repo: string): void })
       if (res.status === 404) throw new Error(`No config.json found for ${repo}. Check the spelling; GGUF-only repos have no config.json, so use the original model repo.`)
       if (!res.ok) throw new Error(`Hugging Face returned ${res.status}.`)
       const t = await res.text()
+      if (!alive.current) return
       setState({ busy: false, err: null })
       onFetched(t, repo)
     } catch (e) {
@@ -116,12 +121,12 @@ function HfFetch({ onFetched }: { onFetched(text: string, repo: string): void })
   )
 }
 
-function Paste({ onText }: { onText(t: string): void }) {
+function Paste({ onText, onEmpty }: { onText(t: string): void; onEmpty(): void }) {
   const [t, setT] = useState('')
   const file = useRef<HTMLInputElement>(null)
   return (
     <div className="stack-sm">
-      <label className="field"><span>config.json contents</span><textarea className="mono" rows={10} value={t} onChange={e => { setT(e.target.value); if (e.target.value.trim()) onText(e.target.value) }} placeholder='{ "hidden_size": 4096, "num_hidden_layers": 32, ... }' spellCheck={false} /></label>
+      <label className="field"><span>config.json contents</span><textarea className="mono" rows={10} value={t} onChange={e => { setT(e.target.value); if (e.target.value.trim()) onText(e.target.value); else onEmpty() }} placeholder='{ "hidden_size": 4096, "num_hidden_layers": 32, ... }' spellCheck={false} /></label>
       <div className="row gap-sm"><button type="button" className="btn ghost sm" onClick={() => file.current?.click()}>Open a file</button><span className="muted small">Validated as you type.</span></div>
       <input ref={file} type="file" accept=".json,application/json" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) { const x = await f.text(); setT(x); onText(x) } }} />
     </div>
