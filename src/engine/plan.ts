@@ -234,6 +234,7 @@ export interface SearchOption {
   replicas: number
   totalDevices: number
   aggTokS: number
+  tokPerJ: number
   perHour: number
   usdPerMTok: number
   ok: boolean
@@ -241,19 +242,21 @@ export interface SearchOption {
 }
 
 /**
- * For each device and mesh size, pick the best tp x pp layout, then the fewest replicas that meet the targets.
+ * For each device and mesh size, pick the best tp x pp layout, then the fewest replicas (never more than the concurrent sequences) that meet the targets.
  * Ranked by hourly cost of the whole deployment, then $/1M tokens.
  */
 export function search(m: ModelSpec, wl: Workload, devices: Device[], a: Assumptions, t: Targets, maxReplicas = 8): SearchOption[] {
   const out: SearchOption[] = []
+  const batch = Math.max(1, Math.ceil(wl.batch))
   for (const d of devices) {
     for (const n of meshSizes(d.maxCount)) {
       let best: SearchOption | null = null
-      for (let r = 1; r <= maxReplicas; r++) {
-        const per = Math.ceil(wl.batch / r)
+      for (let r = 1; r <= Math.min(maxReplicas, batch); r++) {
+        const per = Math.ceil(batch / r)
         const plan = bestLayout(m, { ...wl, batch: per }, d, n, a)
         if (!plan) break
-        const agg = plan.decode.tokS * r
+        // Only the real sequences count: 5 over 4 replicas is 2+1+1+1, not 4 x 2. Paced by the busiest replica.
+        const agg = batch * 1000 / plan.decode.ms
         const perHour = plan.cost.perHour * r
         const why = !plan.mem.weightsFit ? 'weights do not fit'
           : !plan.mem.fits ? `KV for ${per} x ${wl.context.toLocaleString()} tokens does not fit`
@@ -261,7 +264,7 @@ export function search(m: ModelSpec, wl: Workload, devices: Device[], a: Assumpt
           : plan.ttftMs > t.maxTtftMs ? `first token in ${fmtMs(plan.ttftMs)} is over ${fmtMs(t.maxTtftMs)}`
           : agg < t.minTokS ? `${agg.toFixed(0)} tok/s is under ${t.minTokS}`
           : ''
-        const opt: SearchOption = { plan, replicas: r, totalDevices: n * r, aggTokS: agg, perHour, usdPerMTok: perHour / (agg * 3600) * 1e6, ok: !why, reason: why || 'meets targets' }
+        const opt: SearchOption = { plan, replicas: r, totalDevices: n * r, aggTokS: agg, tokPerJ: agg / (n * r * d.watts), perHour, usdPerMTok: perHour / (agg * 3600) * 1e6, ok: !why, reason: why || 'meets targets' }
         if (!best || opt.ok) best = opt
         if (opt.ok || !plan.mem.weightsFit) break
       }
