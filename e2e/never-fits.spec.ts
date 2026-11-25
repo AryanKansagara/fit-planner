@@ -86,12 +86,49 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #8.
   test('the custom device form saves with its default values', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/8: 500 GB/s fails the step=8 check, so Save device does nothing')
     await openSample(page, 'Llama 3.1 8B')
     await page.getByRole('link', { name: 'Hardware', exact: true }).click()
     await page.getByRole('button', { name: 'Add custom device' }).click()
     await page.locator('dialog[open]').getByRole('button', { name: 'Save device' }).click()
     await expect(page.locator('.toasts')).toContainText('Added My accelerator.')
+  })
+
+  test('device values between the spinner steps save; out-of-range and fractional counts do not', async ({ page }) => {
+    await openSample(page, 'Llama 3.1 8B')
+    await page.getByRole('link', { name: 'Hardware', exact: true }).click()
+    const p150a = page.locator('tbody tr', { hasText: 'Blackhole p150a' })
+    const dialog = page.locator('dialog[open]')
+    const save = dialog.getByRole('button', { name: 'Save device' })
+    // A published price that is no multiple of 50.
+    await p150a.getByRole('button', { name: 'Edit' }).click()
+    await save.click()
+    await expect(page.locator('.toasts')).toContainText('Saved your edits to Blackhole p150a for this plan.')
+
+    await p150a.getByRole('button', { name: 'Edit' }).click()
+    await dialog.getByLabel('Memory bandwidth').fill('450.5')
+    await dialog.getByLabel('Max cards in a mesh').fill('2.5')
+    await expect(dialog.getByRole('alert')).toContainText('Max cards must be a whole number.')
+    await expect(save).toBeDisabled()
+    await dialog.getByLabel('Max cards in a mesh').fill('8')
+    await dialog.getByLabel('Price').fill('-5')
+    await save.click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Price').fill('1234.5')
+    await dialog.getByLabel('Max cards in a mesh').fill('300')
+    await save.click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Max cards in a mesh').fill('8')
+    // The arrow keys still move by the field's step.
+    await dialog.getByLabel('Memory bandwidth').press('ArrowUp')
+    await expect(dialog.getByLabel('Memory bandwidth')).toHaveValue('456')
+    await dialog.getByLabel('Memory bandwidth').fill('450.5')
+    await dialog.getByLabel('Name').fill('')
+    await expect(save).toBeDisabled()
+    await dialog.getByLabel('Name').fill('Blackhole p150a')
+    await save.click()
+    await expect(dialog).toHaveCount(0)
+    await expect(p150a).toContainText('451 GB/s')
+    await expect(p150a).toContainText('$1,235')
   })
 
   test('search lists no option that overflows its memory', async ({ page }) => {

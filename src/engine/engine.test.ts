@@ -311,6 +311,12 @@ test('manual specs round-trip through config.json text', () => {
 
 // ---------- Hardware table ----------
 
+test('every published device passes validation; a fractional mesh limit does not', () => {
+  for (const d of DEVICES) assert.deepEqual(validateDevice(d), [], d.id)
+  assert.deepEqual(validateDevice({ ...dev('tt-p150a'), maxCount: 2.5 }), ['Max cards must be a whole number.'])
+  assert.deepEqual(validateDevice({ ...dev('tt-p150a'), maxCount: 0 }), ['Max cards must be greater than zero.'])
+})
+
 test('device edits override the curated table by id; validation and CSV quoting', () => {
   const edited = { ...dev('tt-p150a'), priceUsd: 1000 }
   const merged = mergeDevices([edited, { ...edited, id: 'custom-x', name: 'Box, "v2"' }])
