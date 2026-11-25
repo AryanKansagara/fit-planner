@@ -32,6 +32,9 @@ export function jsonErrorLine(text: string, err: unknown): number | undefined {
   return pos ? text.slice(0, +pos[1]).split('\n').length : undefined
 }
 
+/** Head dim when the config has none. Fewer hidden units than heads leave nothing per head (0), so it is never rounded up to 1. */
+const derivedHeadDim = (hidden: number, heads: number) => hidden < heads ? 0 : Math.round(hidden / heads)
+
 /** Parses a Hugging Face config.json into a ModelSpec, reporting every field it mapped or assumed. */
 export function parseConfig(text: string, nameHint?: string): ParseResult {
   const issues: Issue[] = []
@@ -50,7 +53,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   const modelType = String(o.model_type ?? 'unknown')
   const arch = Array.isArray(o.architectures) && o.architectures.length ? String(o.architectures[0]) : modelType
 
-  const num = (field: string, label: string, keys: string[], fallback?: { value: number; why: string; level?: Issue['level']; needs?: Record<string, number> }): number => {
+  const num = (field: string, label: string, keys: string[], fallback?: { value: number; why: string; level?: Issue['level']; needs?: Record<string, number>; impossible?: { because: string; line?: number } }): number => {
     for (const k of keys) {
       const v = o[k]
       if (typeof v === 'number' && Number.isFinite(v)) {
@@ -65,6 +68,10 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
       const unusable = Object.entries(fallback.needs ?? {}).filter(([, v]) => !Number.isInteger(v) || v <= 0).map(([k]) => k)
       if (unusable.length) {
         issues.push({ level: fallback.level ?? 'warn', field, message: `${label}: ${keys[0]} missing and cannot be derived (${fallback.why}) because ${unusable.join(' and ')} ${unusable.length > 1 ? 'are' : 'is'} missing or invalid.` })
+        return NaN
+      }
+      if (fallback.impossible) {
+        issues.push({ level: 'error', field, message: `${label}: ${keys[0]} missing and cannot be derived (${fallback.why}) because ${fallback.impossible.because}.`, line: fallback.impossible.line })
         return NaN
       }
       mapping.push({ field, label, value: fallback.value, source: `assumed: ${fallback.why}` })
@@ -84,7 +91,10 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   const isMla = typeof o.kv_lora_rank === 'number'
   const headDim = isMla
     ? Number(o.qk_nope_head_dim ?? 0) + Number(o.qk_rope_head_dim ?? 0)
-    : num('headDim', 'Head dim', ['head_dim', 'kv_channels'], { value: Math.round(hidden / heads), why: 'hidden size / heads', level: 'info', needs: { hidden_size: hidden, num_attention_heads: heads } })
+    : num('headDim', 'Head dim', ['head_dim', 'kv_channels'], {
+      value: derivedHeadDim(hidden, heads), why: 'hidden size / heads', level: 'info', needs: { hidden_size: hidden, num_attention_heads: heads },
+      impossible: hidden < heads ? { because: `hidden size ${hidden} is smaller than ${heads} heads`, line: mapping.find(m => m.field === 'hidden')?.line } : undefined,
+    })
   const intermediate = num('intermediate', 'MLP intermediate', typeof o.intermediate_size_mlp === 'number' ? ['intermediate_size_mlp'] : ['intermediate_size', 'n_inner', 'ffn_dim', 'ffn_hidden_size'], { value: 4 * hidden, why: '4 x hidden size', needs: { hidden_size: hidden } })
   const vocab = num('vocab', 'Vocabulary', ['vocab_size', 'padded_vocab_size'])
   const maxContext = num('maxContext', 'Max context', ['max_position_embeddings', 'n_positions', 'seq_length', 'max_sequence_length'], { value: 4096, why: 'no position limit in the config' })
@@ -139,7 +149,7 @@ export function parseConfig(text: string, nameHint?: string): ParseResult {
   }
 
   if (Number.isFinite(heads) && Number.isFinite(kvHeads) && heads % kvHeads !== 0) issues.push({ level: 'error', field: 'kvHeads', message: `Attention heads (${heads}) must be a multiple of KV heads (${kvHeads}).`, line: lineOf(text, 'num_key_value_heads') })
-  if (!mla && o.head_dim === undefined && Number.isFinite(hidden) && heads > 0 && hidden % heads !== 0) issues.push({ level: 'warn', field: 'headDim', message: `hidden_size ${hidden} is not divisible by ${heads} heads; head_dim rounded.` })
+  if (!mla && o.head_dim === undefined && Number.isFinite(headDim) && Number.isFinite(hidden) && heads > 0 && hidden % heads !== 0) issues.push({ level: 'warn', field: 'headDim', message: `hidden_size ${hidden} is not divisible by ${heads} heads; head_dim rounded.` })
   let window: ModelSpec['window']
   if (typeof o.sliding_window === 'number' && o.sliding_window > 0 && o.use_sliding_window !== false && Number.isFinite(layers)) {
     const size = o.sliding_window
@@ -265,7 +275,7 @@ export function attnPairs(m: ModelSpec, n: number): number {
 /** Manual entry: a dense GQA decoder from a handful of numbers. */
 export function manualSpec(p: { name: string; hidden: number; layers: number; heads: number; kvHeads: number; intermediate: number; vocab: number; maxContext: number; experts?: number; activeExperts?: number; expertInter?: number }): ModelSpec {
   return {
-    name: p.name, arch: 'manual', hidden: p.hidden, layers: p.layers, heads: p.heads, kvHeads: p.kvHeads, headDim: Math.round(p.hidden / p.heads),
+    name: p.name, arch: 'manual', hidden: p.hidden, layers: p.layers, heads: p.heads, kvHeads: p.kvHeads, headDim: derivedHeadDim(p.hidden, p.heads),
     intermediate: p.intermediate, vocab: p.vocab, tied: false, maxContext: p.maxContext, gated: true, qkvBias: false, qkNorm: false,
     moe: p.experts && p.experts > 1 ? { experts: p.experts, active: p.activeExperts || 2, expertInter: p.expertInter || p.intermediate, shared: 0, sharedInter: 0, denseLayers: 0 } : undefined,
   }

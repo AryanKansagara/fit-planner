@@ -27,6 +27,8 @@ const BAD: [string, string, RegExp][] = [
   ['layers null', json({ ...LLAMA_8B, num_hidden_layers: null }), /Layers: none of num_hidden_layers/],
   ['heads not a multiple of KV heads', json({ ...LLAMA_8B, num_attention_heads: 30 }), /Attention heads \(30\) must be a multiple of KV heads \(8\)\./],
   ['more KV heads than heads', json({ ...LLAMA_8B, num_key_value_heads: 64 }), /must be a multiple of KV heads \(64\)/],
+  // Issue #13.
+  ['a hidden size smaller than the head count', json({ ...without('head_dim'), hidden_size: 10 }), /Head dim: head_dim missing and cannot be derived \(hidden size \/ heads\) because hidden size 10 is smaller than 32 heads\./],
   ['more active experts than experts', json({ ...LLAMA_8B, num_local_experts: 4, num_experts_per_tok: 8, moe_intermediate_size: 1024 }), /Active experts \(8\) exceeds experts \(4\)\./],
 ]
 
