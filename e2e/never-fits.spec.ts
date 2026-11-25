@@ -120,11 +120,11 @@ test.describe('a model that does not fit is never shown as fitting', () => {
     await hero.locator('input[type=range]').first().focus()
     await page.keyboard.press('End')
     await expect(hero.locator('.hc-controls label').first()).toContainText('DeepSeek V3')
-    // 671B at BFP8 is 713 GB: 32 x 24 GB RTX 4090s hold 768 GB raw but 26.5 GB per card is over 24 GB.
+    // 671B at BFP8 is 713 GB; the RTX 4090 is meshed in at most 8 cards (192 GB).
     await hero.getByRole('button', { name: /4090/ }).click()
-    await expect(hero.locator('.hc-caption strong')).toHaveText('Does not fit on 32x GeForce RTX 4090')
+    await expect(hero.locator('.hc-caption strong')).toHaveText('Does not fit on 8x GeForce RTX 4090')
     await expect(hero.locator('.hc-caption strong.bad-t')).toBeVisible()
-    await expect(hero).toContainText('add cards or shrink the dtype')
+    await expect(hero).toContainText('try another card or a smaller dtype')
     await expect(hero.getByLabel(/tok\/s/).first()).toBeDefined()
     // The smallest model on a card it fits: shows a count, not "Does not fit".
     await hero.locator('input[type=range]').first().focus()
@@ -134,7 +134,6 @@ test.describe('a model that does not fit is never shown as fitting', () => {
 
   // Issue #7.
   test('landing demo respects the device\'s own mesh limit', async ({ page }) => {
-    test.fail(true, 'known bug, https://github.com/AryanKansagara/fit-planner/issues/7: the demo sizes every device up to 32 cards')
     await page.goto('/')
     const hero = page.locator('.hero-card')
     await hero.locator('input[type=range]').first().focus()
@@ -144,6 +143,18 @@ test.describe('a model that does not fit is never shown as fitting', () => {
     const caption = await hero.locator('.hc-caption strong').innerText()
     const count = Number(caption.match(/(\d+)x Blackhole p100a/)?.[1] ?? 0)
     expect(count).toBeLessThanOrEqual(4)
+    await expect(hero.locator('.hc-caption strong')).toHaveText('Does not fit on 4x Blackhole p100a')
+    // At every model size, each card stays within its own limit, and the p150a still reaches 32.
+    for (const [button, max] of [['p100a', 4], ['n300s', 8], ['4090', 8], ['p150a', 32]] as const) {
+      await hero.getByRole('button', { name: new RegExp(button) }).click()
+      const slider = hero.locator('input[type=range]').first()
+      const models = Number(await slider.getAttribute('max'))
+      for (let i = 0; i <= models; i++) {
+        await slider.fill(String(i))
+        const n = Number((await hero.locator('.hc-caption strong').innerText()).match(/(\d+)x /)![1])
+        expect(n, `${button}, model ${i}`).toBeLessThanOrEqual(max)
+      }
+    }
   })
 
   // Issue #3.

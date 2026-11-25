@@ -22,7 +22,7 @@ function Hero() {
   const model = MODELS[mi]
   const device = HERO_DEVICES.find(d => d.id === devId)!
   const wl: Workload = { weightDtype: dtype, kvDtype: 'bf16', context: CONTEXTS[ci], batch: 4, promptLen: Math.min(2000, CONTEXTS[ci] / 2), outputLen: 300 }
-  const r = useMemo(() => minDevices(model.spec, wl, device, DEFAULT_ASSUMPTIONS, 32) ?? bestLayout(model.spec, wl, device, 32, DEFAULT_ASSUMPTIONS), [mi, ci, devId, dtype])
+  const r = useMemo(() => minDevices(model.spec, wl, device, DEFAULT_ASSUMPTIONS) ?? bestLayout(model.spec, wl, device, device.maxCount, DEFAULT_ASSUMPTIONS), [mi, ci, devId, dtype])
   if (!r) return null
   const fill = { weightsGB: r.mem.weightsGB, kvGB: r.mem.kvGB, reserveGB: r.mem.reserveGB, capGB: r.mem.capGB }
   return (
@@ -37,12 +37,12 @@ function Hero() {
         <div className="hc-mesh">
           <Mesh tp={r.tp} pp={r.pp} fill={fill} compact maxTiles={32} />
           <p className="hc-caption">
-            <strong className={r.mem.fits ? '' : 'bad-t'}>{r.mem.fits ? `${r.count}x ${device.name}` : `Does not fit on 32x ${device.name}`}</strong>
+            <strong className={r.mem.fits ? '' : 'bad-t'}>{r.mem.fits ? `${r.count}x ${device.name}` : `Does not fit on ${device.maxCount}x ${device.name}`}</strong>
             <span>TP {r.tp} x PP {r.pp} · {fmtGB(r.mem.usedGB)} of {device.memGB} GB each</span>
           </p>
           <MeshLegend fill={fill} />
         </div>
-        <Dial value={r.mem.fits ? r.decode.tokS : 0} max={Math.max(100, Math.ceil(r.decode.tokS / 100) * 150)} label="tok/s, 4 users" sub={r.mem.fits ? `${fmtNum(r.decode.perUserTokS, 1)} tok/s each · first token ${r.ttftMs < 1000 ? fmtNum(r.ttftMs) + ' ms' : fmtNum(r.ttftMs / 1000, 1) + ' s'}` : 'add cards or shrink the dtype'} />
+        <Dial value={r.mem.fits ? r.decode.tokS : 0} max={Math.max(100, Math.ceil(r.decode.tokS / 100) * 150)} label="tok/s, 4 users" sub={r.mem.fits ? `${fmtNum(r.decode.perUserTokS, 1)} tok/s each · first token ${r.ttftMs < 1000 ? fmtNum(r.ttftMs) + ' ms' : fmtNum(r.ttftMs / 1000, 1) + ' s'}` : 'try another card or a smaller dtype'} />
       </div>
       <div className="hc-controls">
         <label className="slider">
