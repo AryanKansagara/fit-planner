@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseConfig } from './model.ts'
+import { manualSpec, parseConfig, specToConfig } from './model.ts'
 
 const BASE = { model_type: 'llama', hidden_size: 4096, num_hidden_layers: 32, num_attention_heads: 32, num_key_value_heads: 8, head_dim: 128, intermediate_size: 14336, vocab_size: 128256, max_position_embeddings: 131072 }
 const MOE = { ...BASE, num_local_experts: 8, num_experts_per_tok: 2, decoder_sparse_step: 2 }
@@ -33,4 +33,33 @@ test('an underivable field names what it needs; a derivable one is still assumed
   assert.equal(ok.spec!.kvHeads, 32)
   assert.equal(ok.spec!.headDim, 128)
   assert.equal(ok.spec!.intermediate, 16384)
+})
+
+// Issue #13.
+test('a hidden size smaller than the head count leaves no head dim and is an error', () => {
+  const noDim = without(BASE, 'head_dim')
+  for (const head_dim of [undefined, null]) for (const [hidden, heads] of [[10, 32], [15, 32], [16, 32], [31, 32], [1, 8]]) {
+    const text = JSON.stringify({ ...noDim, hidden_size: hidden, num_attention_heads: heads, head_dim }, null, 2)
+    const r = parseConfig(text)
+    assert.equal(r.spec, null, text)
+    assert.deepEqual(r.issues, [{ level: 'error', field: 'headDim', line: 3, message: `Head dim: head_dim missing and cannot be derived (hidden size / heads) because hidden size ${hidden} is smaller than ${heads} heads.` }], text)
+    assert.equal(r.mapping.some(m => m.field === 'headDim'), false)
+  }
+  // The head dim is only derived when the config has none: an explicit one, or latent attention, does not need it.
+  const tiny = { ...noDim, hidden_size: 10 }
+  assert.equal(parseConfig(JSON.stringify({ ...tiny, head_dim: 64 })).spec!.headDim, 64)
+  assert.equal(parseConfig(JSON.stringify({ ...tiny, kv_channels: 64 })).spec!.headDim, 64)
+  assert.ok(parseConfig(JSON.stringify({ ...tiny, kv_lora_rank: 512, qk_nope_head_dim: 128, qk_rope_head_dim: 64, v_head_dim: 128 })).spec)
+  // One unit per head is the smallest that works.
+  assert.equal(parseConfig(JSON.stringify({ ...noDim, hidden_size: 32 })).spec!.headDim, 1)
+  // An unusable input is reported as such, not compared with the other.
+  assert.equal(parseConfig(JSON.stringify({ ...noDim, hidden_size: -4 })).issues.some(i => /smaller than/.test(i.message)), false)
+})
+
+test('the manual form cannot round a head dim up from nothing either', () => {
+  for (const hidden of [10, 16, 31]) {
+    const r = parseConfig(specToConfig(manualSpec({ name: 'Tiny', hidden, layers: 2, heads: 32, kvHeads: 8, intermediate: 64, vocab: 1000, maxContext: 1024 })))
+    assert.equal(r.spec, null)
+    assert.ok(r.issues.some(i => i.level === 'error' && /head_dim must be a positive integer \(got 0\)/.test(i.message)))
+  }
 })
